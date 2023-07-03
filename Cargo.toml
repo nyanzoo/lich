@@ -1,9 +1,16 @@
 [package]
+edition = "2021"
 name = "lich"
 version = "0.1.0"
-edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-phylactery = { git = "https://github.com/nyanzoo/phylactery" }
+log = "0.4"
+pretty_env_logger = "0.5"
+
+# necronomicon = {git = "https://github.com/nyanzoo/necronomicon"}
+necronomicon = {path = "../necronomicon"}
+# phylactery = {git = "https://github.com/nyanzoo/phylactery"}
+phylactery = {path = "../phylactery"}
+
