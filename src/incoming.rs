@@ -1,13 +1,13 @@
 use std::{
     io::Write,
-    net::{IpAddr, Ipv6Addr, SocketAddr, TcpListener},
+    net::{IpAddr, Ipv6Addr, SocketAddr, TcpListener, TcpStream},
     sync::mpsc::{self, TryRecvError},
     thread::JoinHandle,
 };
 
 use log::{error, info, trace};
 
-use necronomicon::{Ack, Decode, Header};
+use necronomicon::{partial_decode, Ack, Encode, Header};
 use phylactery::{buffer::InMemBuffer, ring_buffer::Pusher};
 
 use crate::acks::Acks;
@@ -17,7 +17,7 @@ use crate::acks::Acks;
 pub(super) struct Incoming {
     listener: TcpListener,
     pusher: Pusher<InMemBuffer>,
-    ack_rx: mpsc::Receiver<Box<dyn Ack>>,
+    ack_rx: mpsc::Receiver<Box<dyn Encode<TcpStream>>>,
     acks: Acks,
 }
 
@@ -25,7 +25,7 @@ impl Incoming {
     pub(super) fn new(
         port: u16,
         pusher: Pusher<InMemBuffer>,
-        ack_rx: mpsc::Receiver<Box<dyn Ack>>,
+        ack_rx: mpsc::Receiver<Box<dyn Encode<TcpStream>>>,
     ) -> Self {
         let listener = TcpListener::bind(SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), port))
             .expect("listener");
@@ -37,16 +37,15 @@ impl Incoming {
         }
     }
 
+    // TODO: we need to have a request type that maps to clients, that way we can send the acks back to the correct client without having to send response back to `Incoming`.
     pub(super) fn run(self) -> JoinHandle<()> {
         std::thread::spawn(move || {
-            loop {
-                match self.listener.accept() {
-                    Ok((mut stream, addr)) => {
-                        info!("accepted connection from {}", addr);
-
+            for stream in self.listener.incoming() {
+                match stream {
+                    Ok(stream) => {
                         let mut header = Header::decode(&mut stream).expect("decode");
 
-                        match header.
+                        let packet = partial_decode(header, &mut stream).expect("partial_decode");
 
                         let mut buf = vec![0; header.length as usize];
 
@@ -71,9 +70,10 @@ impl Incoming {
                                 }
                             }
                             Err(_) => {
-                                let ack = Ack::failure();
-                                let ack = ack.encode();
-                                _ = stream.write(&ack).expect("ack err");
+                                if let Some(nack) = packet.nack(necronomicon::SERVER_BUSY) {
+                                    nack.encode(&mut stream).expect("encode");
+                                    stream.flush().expect("flush");
+                                }
                             }
                         }
                     }

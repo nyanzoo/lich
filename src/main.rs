@@ -31,8 +31,7 @@ pub const LICH_DIR: &str = "./lich/";
 ///
 fn data_loop() -> ! {
     let (pusher, popper) =
-    ring_buffer(buffer::InMemBuffer::new(util::gigabytes(1)), Version::V1)
-        .expect("dequeue");
+        ring_buffer(buffer::InMemBuffer::new(util::gigabytes(1)), Version::V1).expect("dequeue");
 
     let incoming = Incoming::new(9999, pusher);
     let in_handle = incoming.run();

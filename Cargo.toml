@@ -8,6 +8,7 @@ version = "0.1.0"
 [dependencies]
 log = "0.4"
 pretty_env_logger = "0.5"
+toml = "0.7"
 
 # necronomicon = {git = "https://github.com/nyanzoo/necronomicon"}
 necronomicon = {path = "../necronomicon"}
