@@ -1,66 +1,47 @@
-use std::{
-    io::{Read, Write},
-    mem::size_of,
-    net::{IpAddr, Ipv6Addr, SocketAddr, TcpListener, TcpStream},
-    thread::JoinHandle,
-    time::Duration,
-};
+use std::sync::mpsc;
 
 use incoming::Incoming;
-use log::{error, info};
 
-use necronomicon::{Ack, Header};
-use phylactery::{
-    buffer,
-    dequeue::{self, dequeue},
-    entry::Version,
-    ring_buffer::ring_buffer,
-};
+use phylactery::{buffer, entry::Version, ring_buffer::ring_buffer};
 
-mod acks;
+// mod acks;
+mod config;
+mod error;
 mod incoming;
 mod outgoing;
+mod reqres;
+mod session;
 mod state;
+mod store;
 mod util;
 
 pub const LICH_DIR: &str = "./lich/";
 
-/// # Description
-/// This is for running the data flow of a node in chain replication.
-/// It has one thread for receiving data, one thread for processing data, and one thread for sending data.
-///
-fn data_loop() -> ! {
-    let (pusher, popper) =
-        ring_buffer(buffer::InMemBuffer::new(util::gigabytes(1)), Version::V1).expect("dequeue");
-
-    let incoming = Incoming::new(9999, pusher);
-    let in_handle = incoming.run();
-
-    let connection = TcpStream::connect("tbd").expect("out client");
-
-    let process_handle = std::thread::spawn(move || {
-        // Note: this might be a lot of copying of data.
-        // once for insert into the dequeue
-        let mut buf = vec![0; 1024];
-        // TODO: need to update interface of these to take a `Writer` to allow direct writes from the buffer.
-        while let Ok(pop) = popper.pop(&mut buf) {}
-    });
-
-    let out_handle = std::thread::spawn(move || {});
-
-    in_handle.join().expect("in_handle");
-    process_handle.join().expect("process_handle");
-    out_handle.join().expect("out_handle");
-}
-
-fn operator_loop() {
-    todo!("operator_loop")
-}
+// INCOMING:
+// Incoming will need to have tx+rx for requests and acks.
+// Incoming will read in a request and send it over to state for processing.
+//
+// STATE:
+// If state is tail then it will commit the change to the store, perform any actions and send back ack to incoming
+// If state is head/mid then it will need to store the change in pending and send to next node via Outgoing. It will need to get an
+// ack back from next node and then commit that change and send ack back to Incoming.
+// If state is candidate then it will need to read out transaction log and send to next node via Outgoing.
+//
+// OUTGOING:
+// Outgoing will need to have tx+rx for requests and acks. It sends out operator msgs to operator. The rest to next node.
+// Need to read out responses and send acks back to STATE.
 
 fn main() {
     pretty_env_logger::init();
 
-    operator_loop();
+    // let (pusher, popper) =
+    //     ring_buffer(buffer::InMemBuffer::new(util::gigabytes(1)), Version::V1).expect("dequeue");
 
-    data_loop();
+    // let (requests_tx, requests_rx) = mpsc::channel();
+    // Incoming::new(9999, requests_tx).run();
+
+    // let state = state::State::new(store, requests_rx);
+
+    // loop {}
+    todo!()
 }

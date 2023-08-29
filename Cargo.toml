@@ -6,12 +6,21 @@ version = "0.1.0"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+crossbeam = "0.8"
+hashlink = "0.8"
 log = "0.4"
+parking_lot = "0.12"
 pretty_env_logger = "0.5"
+rayon = "1.7"
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "1.0"
 toml = "0.7"
 
 # necronomicon = {git = "https://github.com/nyanzoo/necronomicon"}
-necronomicon = {path = "../necronomicon"}
+necronomicon = { path = "../necronomicon" }
 # phylactery = {git = "https://github.com/nyanzoo/phylactery"}
-phylactery = {path = "../phylactery"}
+phylactery = { path = "../phylactery" }
 
+
+[dev-dependencies]
+tempfile = "3.8"
