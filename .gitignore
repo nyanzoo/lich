@@ -15,3 +15,6 @@
 # tarpaulin coverage files
 *.profraw
 lcov.info
+
+# lich files
+*.bin

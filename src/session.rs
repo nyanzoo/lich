@@ -3,20 +3,30 @@ use std::{
     net::TcpStream,
 };
 
+#[derive(Debug)]
 pub struct Session {
     stream: TcpStream,
-    connect_time: u64,
     last_seen: u64,
     keep_alive: u64,
 }
 
+/// `Clone` for `Session` is implemented by cloning the underlying `TcpStream`.
+/// See https://doc.rust-lang.org/stable/std/net/struct.TcpStream.html#method.try_clone
+impl Clone for Session {
+    fn clone(&self) -> Self {
+        Self {
+            stream: self.stream.try_clone().expect("clone"),
+            last_seen: self.last_seen,
+            keep_alive: self.keep_alive,
+        }
+    }
+}
+
 impl Session {
     pub fn new(stream: TcpStream, keep_alive: u64) -> Self {
-        let connect_time = now();
         Self {
             stream,
-            connect_time,
-            last_seen: connect_time,
+            last_seen: now(),
             keep_alive,
         }
     }

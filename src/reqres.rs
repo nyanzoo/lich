@@ -1,4 +1,9 @@
-use std::{io::Write, sync::mpsc};
+use std::{
+    io::{Read, Write},
+    sync::mpsc,
+};
+
+use log::trace;
 
 use necronomicon::{
     dequeue_codec::{
@@ -6,15 +11,43 @@ use necronomicon::{
         PeekAck,
     },
     kv_store_codec::{self, Get, GetAck, Put, PutAck},
-    system_codec::{Chain, ChainAck, Join, JoinAck, Transfer, TransferAck},
-    Encode, Packet,
+    system_codec::{Join, JoinAck, Ping, PingAck, Report, ReportAck, Transfer, TransferAck},
+    Ack, Decode, Encode, Header, Kind, Packet, PartialDecode,
 };
 
 #[derive(Clone, Debug)]
-pub(crate) enum OperatorRequest {
-    Chain(Chain),
+pub(crate) enum System {
     Join(Join),
+    JoinAck(JoinAck),
+
+    Ping(Ping),
+    PingAck(PingAck),
+
+    Report(Report),
+    ReportAck(ReportAck),
+
     Transfer(Transfer),
+    TransferAck(TransferAck),
+}
+
+impl From<Packet> for System {
+    fn from(value: Packet) -> Self {
+        match value {
+            Packet::Join(join) => System::Join(join),
+            Packet::JoinAck(join_ack) => System::JoinAck(join_ack),
+
+            Packet::Ping(ping) => System::Ping(ping),
+            Packet::PingAck(ping_ack) => System::PingAck(ping_ack),
+
+            Packet::Report(report) => System::Report(report),
+            Packet::ReportAck(report_ack) => System::ReportAck(report_ack),
+
+            Packet::Transfer(transfer) => System::Transfer(transfer),
+            Packet::TransferAck(transfer_ack) => System::TransferAck(transfer_ack),
+
+            _ => panic!("invalid packet type {value:?}"),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -102,28 +135,51 @@ where
     }
 }
 
-#[derive(Clone, Debug)]
-pub(crate) enum Request {
-    Operator(OperatorRequest),
-    Client(ClientRequest),
-}
-
-#[derive(Debug)]
-pub(crate) enum ChainResponse {
-    Chain(ChainAck),
-    Join(JoinAck),
-    Transfer(TransferAck),
-}
-
-impl<W> Encode<W> for ChainResponse
+impl<W> Encode<W> for System
 where
     W: Write,
 {
     fn encode(&self, writer: &mut W) -> Result<(), necronomicon::Error> {
         match self {
-            ChainResponse::Chain(ack) => ack.encode(writer),
-            ChainResponse::Join(ack) => ack.encode(writer),
-            ChainResponse::Transfer(ack) => ack.encode(writer),
+            System::Join(ack) => ack.encode(writer),
+            System::JoinAck(ack) => ack.encode(writer),
+
+            System::Ping(ack) => ack.encode(writer),
+            System::PingAck(ack) => ack.encode(writer),
+
+            System::Report(ack) => ack.encode(writer),
+            System::ReportAck(ack) => ack.encode(writer),
+
+            System::Transfer(ack) => ack.encode(writer),
+            System::TransferAck(ack) => ack.encode(writer),
+        }
+    }
+}
+
+impl<R> Decode<R> for System
+where
+    R: Read,
+{
+    fn decode(reader: &mut R) -> Result<Self, necronomicon::Error>
+    where
+        Self: Sized,
+    {
+        let header = Header::decode(reader)?;
+
+        match header.kind() {
+            Kind::Join => Ok(System::Join(Join::decode(header, reader)?)),
+            Kind::JoinAck => Ok(System::JoinAck(JoinAck::decode(header, reader)?)),
+
+            Kind::Ping => Ok(System::Ping(Ping::decode(header, reader)?)),
+            Kind::PingAck => Ok(System::PingAck(PingAck::decode(header, reader)?)),
+
+            Kind::Report => Ok(System::Report(Report::decode(header, reader)?)),
+            Kind::ReportAck => Ok(System::ReportAck(ReportAck::decode(header, reader)?)),
+
+            Kind::Transfer => Ok(System::Transfer(Transfer::decode(header, reader)?)),
+            Kind::TransferAck => Ok(System::TransferAck(TransferAck::decode(header, reader)?)),
+
+            _ => panic!("invalid packet type {header:?}"),
         }
     }
 }
@@ -144,18 +200,53 @@ pub(crate) enum ClientResponse {
     Delete(kv_store_codec::DeleteAck),
 }
 
+impl Ack for ClientResponse {
+    fn header(&self) -> &Header {
+        match self {
+            ClientResponse::CreateQueue(ack) => ack.header(),
+            ClientResponse::DeleteQueue(ack) => ack.header(),
+            ClientResponse::Enqueue(ack) => ack.header(),
+            ClientResponse::Dequeue(ack) => ack.header(),
+            ClientResponse::Peek(ack) => ack.header(),
+            ClientResponse::Len(ack) => ack.header(),
+
+            ClientResponse::Put(ack) => ack.header(),
+            ClientResponse::Get(ack) => ack.header(),
+            ClientResponse::Delete(ack) => ack.header(),
+        }
+    }
+
+    fn response_code(&self) -> u8 {
+        match self {
+            ClientResponse::CreateQueue(ack) => ack.response_code(),
+            ClientResponse::DeleteQueue(ack) => ack.response_code(),
+            ClientResponse::Enqueue(ack) => ack.response_code(),
+            ClientResponse::Dequeue(ack) => ack.response_code(),
+            ClientResponse::Peek(ack) => ack.response_code(),
+            ClientResponse::Len(ack) => ack.response_code(),
+
+            ClientResponse::Put(ack) => ack.response_code(),
+            ClientResponse::Get(ack) => ack.response_code(),
+            ClientResponse::Delete(ack) => ack.response_code(),
+        }
+    }
+}
+
 impl<W> Encode<W> for ClientResponse
 where
     W: Write,
 {
     fn encode(&self, writer: &mut W) -> Result<(), necronomicon::Error> {
         match self {
+            // dequeue
             ClientResponse::CreateQueue(ack) => ack.encode(writer),
             ClientResponse::DeleteQueue(ack) => ack.encode(writer),
             ClientResponse::Enqueue(ack) => ack.encode(writer),
             ClientResponse::Dequeue(ack) => ack.encode(writer),
             ClientResponse::Peek(ack) => ack.encode(writer),
             ClientResponse::Len(ack) => ack.encode(writer),
+
+            // kv store
             ClientResponse::Put(ack) => ack.encode(writer),
             ClientResponse::Get(ack) => ack.encode(writer),
             ClientResponse::Delete(ack) => ack.encode(writer),
@@ -164,90 +255,76 @@ where
 }
 
 #[derive(Debug)]
-pub(crate) enum Response {
-    Chain(ChainResponse),
-    Client(ClientResponse),
-}
-
-impl<W> Encode<W> for Response
-where
-    W: Write,
-{
-    fn encode(&self, writer: &mut W) -> Result<(), necronomicon::Error> {
-        match self {
-            Response::Chain(ack) => ack.encode(writer),
-            Response::Client(ack) => ack.encode(writer),
-        }
-    }
-}
-
-#[derive(Debug)]
 pub(crate) struct ProcessRequest {
-    pub request: Request,
-    response_tx: mpsc::Sender<Response>,
+    pub request: ClientRequest,
+    response_tx: mpsc::Sender<ClientResponse>,
 }
 
 impl ProcessRequest {
-    pub(crate) fn new(request: Request, response_tx: mpsc::Sender<Response>) -> Self {
+    pub(crate) fn new(request: ClientRequest, response_tx: mpsc::Sender<ClientResponse>) -> Self {
         Self {
             request,
             response_tx,
         }
     }
 
-    pub(crate) fn complete(self, response: Response) {
-        self.response_tx
-            .send(response)
-            .expect("must be able to send response");
+    pub(crate) fn into_parts(self) -> (ClientRequest, PendingRequest) {
+        (
+            self.request,
+            PendingRequest {
+                response_tx: self.response_tx,
+            },
+        )
     }
 }
 
-impl From<Packet> for Request {
+pub(crate) struct PendingRequest {
+    response_tx: mpsc::Sender<ClientResponse>,
+}
+
+impl PendingRequest {
+    pub(crate) fn complete(self, response: ClientResponse) {
+        trace!("sending response: {:?}", response);
+        self.response_tx.send(response).expect("send");
+    }
+}
+
+impl From<Packet> for ClientRequest {
     fn from(value: Packet) -> Self {
         match value {
             // dequeue
-            Packet::Enqueue(enqueue) => Request::Client(ClientRequest::Enqueue(enqueue)),
-            Packet::Dequeue(dequeue) => Request::Client(ClientRequest::Dequeue(dequeue)),
-            Packet::Peek(peek) => Request::Client(ClientRequest::Peek(peek)),
-            Packet::Len(len) => Request::Client(ClientRequest::Len(len)),
-            Packet::CreateQueue(create) => Request::Client(ClientRequest::CreateQueue(create)),
-            Packet::DeleteQueue(delete) => Request::Client(ClientRequest::DeleteQueue(delete)),
+            Packet::Enqueue(enqueue) => ClientRequest::Enqueue(enqueue),
+            Packet::Dequeue(dequeue) => ClientRequest::Dequeue(dequeue),
+            Packet::Peek(peek) => ClientRequest::Peek(peek),
+            Packet::Len(len) => ClientRequest::Len(len),
+            Packet::CreateQueue(create) => ClientRequest::CreateQueue(create),
+            Packet::DeleteQueue(delete) => ClientRequest::DeleteQueue(delete),
 
             // kv store
-            Packet::Put(put) => Request::Client(ClientRequest::Put(put)),
-            Packet::Get(get) => Request::Client(ClientRequest::Get(get)),
-            Packet::Delete(delete) => Request::Client(ClientRequest::Delete(delete)),
-
-            // system
-            Packet::Chain(chain) => Request::Operator(OperatorRequest::Chain(chain)),
-            Packet::Join(join) => Request::Operator(OperatorRequest::Join(join)),
-            Packet::Transfer(transfer) => Request::Operator(OperatorRequest::Transfer(transfer)),
+            Packet::Put(put) => ClientRequest::Put(put),
+            Packet::Get(get) => ClientRequest::Get(get),
+            Packet::Delete(delete) => ClientRequest::Delete(delete),
 
             _ => panic!("invalid packet type {value:?}"),
         }
     }
 }
 
-impl From<Packet> for Response {
+impl From<Packet> for ClientResponse {
     fn from(value: Packet) -> Self {
         match value {
             // dequeue
-            Packet::EnqueueAck(ack) => Response::Client(ClientResponse::Enqueue(ack)),
-            Packet::DequeueAck(ack) => Response::Client(ClientResponse::Dequeue(ack)),
-            Packet::PeekAck(ack) => Response::Client(ClientResponse::Peek(ack)),
-            Packet::LenAck(ack) => Response::Client(ClientResponse::Len(ack)),
-            Packet::CreateQueueAck(ack) => Response::Client(ClientResponse::CreateQueue(ack)),
-            Packet::DeleteQueueAck(ack) => Response::Client(ClientResponse::DeleteQueue(ack)),
+            Packet::EnqueueAck(ack) => ClientResponse::Enqueue(ack),
+            Packet::DequeueAck(ack) => ClientResponse::Dequeue(ack),
+            Packet::PeekAck(ack) => ClientResponse::Peek(ack),
+            Packet::LenAck(ack) => ClientResponse::Len(ack),
+            Packet::CreateQueueAck(ack) => ClientResponse::CreateQueue(ack),
+            Packet::DeleteQueueAck(ack) => ClientResponse::DeleteQueue(ack),
 
             // kv store
-            Packet::PutAck(ack) => Response::Client(ClientResponse::Put(ack)),
-            Packet::GetAck(ack) => Response::Client(ClientResponse::Get(ack)),
-            Packet::DeleteAck(ack) => Response::Client(ClientResponse::Delete(ack)),
-
-            // system
-            Packet::ChainAck(ack) => Response::Chain(ChainResponse::Chain(ack)),
-            Packet::JoinAck(ack) => Response::Chain(ChainResponse::Join(ack)),
-            Packet::TransferAck(ack) => Response::Chain(ChainResponse::Transfer(ack)),
+            Packet::PutAck(ack) => ClientResponse::Put(ack),
+            Packet::GetAck(ack) => ClientResponse::Get(ack),
+            Packet::DeleteAck(ack) => ClientResponse::Delete(ack),
 
             _ => panic!("invalid packet type {value:?}"),
         }

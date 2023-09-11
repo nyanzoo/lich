@@ -1,16 +1,16 @@
 use std::{
     io::Write,
     net::{IpAddr, Ipv6Addr, SocketAddr, TcpListener},
-    sync::mpsc::{self, TryRecvError},
 };
 
+use crossbeam::channel::Sender;
 use log::{debug, error, info, trace, warn};
 
 use necronomicon::{full_decode, Encode};
 use rayon::{ThreadPool, ThreadPoolBuilder};
 
 use crate::{
-    reqres::{ProcessRequest, Request},
+    reqres::{ClientRequest, ProcessRequest},
     session::Session,
 };
 
@@ -19,12 +19,13 @@ use crate::{
 pub(super) struct Incoming {
     listener: TcpListener,
     // NOTE: later maybe replace with dequeue? It might be slower but it will allow for recovery of even unprocessed msgs.
-    requests_tx: mpsc::Sender<ProcessRequest>,
+    requests_tx: Sender<ProcessRequest>,
     pool: ThreadPool,
 }
 
 impl Incoming {
-    pub(super) fn new(port: u16, requests_tx: mpsc::Sender<ProcessRequest>) -> Self {
+    pub(super) fn new(port: u16, requests_tx: Sender<ProcessRequest>) -> Self {
+        info!("starting listening for incoming requests on port {}", port);
         let listener = TcpListener::bind(SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), port))
             .expect("listener");
         let pool = ThreadPoolBuilder::new()
@@ -50,10 +51,13 @@ impl Incoming {
         for stream in listener.incoming() {
             match stream {
                 Ok(stream) => {
+                    stream.set_nonblocking(true).expect("set_nonblocking");
                     let requests_tx = requests_tx.clone();
                     let session = Session::new(stream, 5);
+                    info!("new session {:?}", session);
                     // I think the acks need to be oneshots that are per
-                    pool.spawn(|| {
+                    pool.install(|| {
+                        debug!("spawned thread for incoming session {:?}", session);
                         handle_incoming(session, requests_tx);
                     });
                 }
@@ -63,15 +67,15 @@ impl Incoming {
     }
 }
 
-fn handle_incoming(mut session: Session, requests_tx: mpsc::Sender<ProcessRequest>) {
-    let (ack_tx, ack_rx) = mpsc::channel();
+fn handle_incoming(mut session: Session, requests_tx: Sender<ProcessRequest>) {
+    let (ack_tx, ack_rx) = std::sync::mpsc::channel();
     loop {
         match full_decode(&mut session) {
             Ok(packet) => {
                 session.update_last_seen();
                 trace!("got {:?} packet", packet);
 
-                let request = Request::from(packet.clone());
+                let request = ClientRequest::from(packet.clone());
                 let request = ProcessRequest::new(request, ack_tx.clone());
 
                 // TODO: fill buf
@@ -90,12 +94,14 @@ fn handle_incoming(mut session: Session, requests_tx: mpsc::Sender<ProcessReques
                                         session.flush().expect("flush");
                                     }
                                 }
-                                Err(TryRecvError::Disconnected) => {
+                                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                                     panic!("ack_rx disconnected")
                                 }
-                                Err(TryRecvError::Empty) => break,
+                                Err(std::sync::mpsc::TryRecvError::Empty) => break,
                             }
                         }
+
+                        trace!("flushing session");
                         session.flush().expect("flush");
                     }
                     Err(err) => {
@@ -116,8 +122,28 @@ fn handle_incoming(mut session: Session, requests_tx: mpsc::Sender<ProcessReques
                     break;
                 }
             }
+            Err(necronomicon::Error::Io(err)) | Err(necronomicon::Error::IncompleteHeader(err)) => {
+                // Try to get all the acks we can.
+                loop {
+                    match ack_rx.try_recv() {
+                        Ok(ack) => {
+                            trace!("got ack {:?}", ack);
+                            // TODO: need to see if we need to break here on some cases?
+                            if let Err(_) = ack.encode(&mut session) {
+                                session.flush().expect("flush");
+                            }
+                        }
+                        Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                            panic!("ack_rx disconnected")
+                        }
+                        Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                    }
+                }
+
+                session.flush().expect("flush");
+            }
             Err(err) => {
-                warn!("err: {}", err);
+                error!("err: {}", err);
                 break;
             }
         }

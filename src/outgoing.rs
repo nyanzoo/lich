@@ -1,17 +1,20 @@
-use std::{io::Write, net::{TcpStream, ToSocketAddrs}};
+use std::{
+    io::Write,
+    net::{TcpStream, ToSocketAddrs},
+};
 
 use crossbeam::channel::{Receiver, Sender};
 use log::info;
 
 use necronomicon::{full_decode, Encode, Packet};
 
-use crate::reqres::Response;
+use crate::reqres::ClientResponse;
 
 // Needs to be created by receiving an update from operator, which means `state.rs`
 // needs to be able to create `Outgoing` and start it and kill it.
 pub(super) struct Outgoing {
     requests_rx: Receiver<Packet>,
-    ack_tx: Sender<Response>,
+    ack_tx: Sender<ClientResponse>,
 
     stream: TcpStream,
 }
@@ -20,7 +23,7 @@ impl Outgoing {
     pub(super) fn new(
         addr: impl ToSocketAddrs,
         requests_rx: Receiver<Packet>,
-        ack_tx: Sender<Response>,
+        ack_tx: Sender<ClientResponse>,
     ) -> Self {
         let stream = TcpStream::connect(addr).expect("failed to connect to outgoing");
 
@@ -52,7 +55,7 @@ impl Outgoing {
         std::thread::spawn(move || loop {
             let packet = full_decode(&mut read).expect("failed to decode packet");
 
-            let response = Response::from(packet);
+            let response = ClientResponse::from(packet);
             self.ack_tx.send(response).expect("failed to send ack");
         });
     }

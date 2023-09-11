@@ -4,8 +4,6 @@ use hashlink::LinkedHashMap;
 use log::{trace, warn};
 
 use necronomicon::{
-    dequeue_codec::{self, Create, Delete, Enqueue},
-    kv_store_codec::Put,
     Encode, Packet, FAILED_TO_PUSH_TO_TRANSACTION_LOG, INTERNAL_ERROR, KEY_DOES_NOT_EXIST,
     QUEUE_ALREADY_EXISTS, QUEUE_DOES_NOT_EXIST,
 };
@@ -16,9 +14,8 @@ use phylactery::{
     kv_store::{Graveyard, KVStore, Lookup},
     ring_buffer::{self, ring_buffer},
 };
-use serde::de;
 
-use crate::{config::Config, error::Error, reqres::ClientRequest, util::megabytes};
+use crate::{config::StoreConfig, error::Error, reqres::ClientRequest, util::megabytes};
 
 #[derive(Clone, Debug)]
 enum CommitStatus {
@@ -65,7 +62,7 @@ impl Store<String> {
     ///
     /// # Errors
     /// See `error::Error` for details.
-    pub fn new(config: &Config) -> Result<Self, Error> {
+    pub fn new(config: &StoreConfig) -> Result<Self, Error> {
         let mmap_path = format!("{}/mmap.bin", config.path);
 
         let version = Version::try_from(config.version).expect("valid version");
@@ -126,9 +123,9 @@ impl Store<String> {
         }
 
         let mut packets = Vec::new();
-        while let Some((_, commit)) = self.pending.front() {
+        while let Some(commit) = self.pending.front().map(|(_, v)| v.clone()) {
             if let CommitStatus::Committed(patch) = commit {
-                packets.push(self.commit_patch(patch.clone(), buf));
+                packets.push(self.commit_patch(patch, buf));
                 self.pending.pop_front();
             } else {
                 break;
@@ -176,7 +173,7 @@ impl Store<String> {
 
             ClientRequest::DeleteQueue(queue) => {
                 let path = queue.path();
-                let ack = if let Some(delete_queue) = self.dequeues.remove(path) {
+                let ack = if let Some(_) = self.dequeues.remove(path) {
                     remove_dir(format!("{}/{}", self.root, path)).expect("must be able to remove");
                     trace!("deleted queue {:?}", path);
                     queue.ack()
@@ -262,7 +259,7 @@ mod tests {
         Header, Kind, Packet,
     };
 
-    use crate::{config::Config, reqres::ClientRequest};
+    use crate::{config::StoreConfig, reqres::ClientRequest};
 
     use super::Store;
 
@@ -273,7 +270,12 @@ mod tests {
         let dir = tempdir().expect("temp file");
         let path = dir.path().to_str().unwrap().to_string();
 
-        let config = Config::test_new(path);
+        let config = StoreConfig {
+            path,
+            meta_size: 1024,
+            node_size: 1024,
+            version: 1,
+        };
         let mut store = Store::new(&config).expect("store");
 
         let put = Put::new(
