@@ -1,6 +1,6 @@
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct EndpointConfig {
-    pub addr: String,
+    pub port: u16,
 
     pub operator_addr: String,
 }
@@ -25,7 +25,7 @@ pub struct StoreConfig {
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct OperatorConfig {
-    pub addr: String,
+    pub port: u16,
 }
 
 #[cfg(test)]
@@ -38,7 +38,7 @@ pub mod test {
         let config = toml::from_str::<BackendConfig>(
             r"
             [endpoints]
-            addr = 'localhost:10001'
+            port = 10001
             operator_addr = 'localhost:10000'
 
             [store]
@@ -53,7 +53,7 @@ pub mod test {
             config,
             BackendConfig {
                 endpoints: EndpointConfig {
-                    addr: "localhost:10001".to_string(),
+                    port: 10001,
                     operator_addr: "localhost:10000".to_string()
                 },
                 store: StoreConfig {
@@ -68,17 +68,7 @@ pub mod test {
 
     #[test]
     fn test_operator_config() {
-        let config = toml::from_str::<OperatorConfig>(
-            r"
-            addr = 'localhost:10000'
-        ",
-        )
-        .expect("valid config");
-        assert_eq!(
-            config,
-            OperatorConfig {
-                addr: "localhost:10000".to_string(),
-            }
-        );
+        let config = toml::from_str::<OperatorConfig>("port = 10000").expect("valid config");
+        assert_eq!(config, OperatorConfig { port: 10000 });
     }
 }

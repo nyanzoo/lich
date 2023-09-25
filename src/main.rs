@@ -16,24 +16,34 @@ mod session;
 mod state;
 
 mod store;
+mod stream;
 mod util;
 
 #[cfg(feature = "operator")]
-fn main() {
-    use std::net::{IpAddr, Ipv6Addr, SocketAddr, TcpListener};
+fn operator() {
+    use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 
     use log::{error, info, trace};
     use rayon::ThreadPoolBuilder;
 
     use necronomicon::full_decode;
 
-    use crate::{operator::Cluster, reqres::System, session::Session};
+    use crate::{
+        config::OperatorConfig, operator::Cluster, reqres::System, session::Session,
+        stream::TcpListener,
+    };
 
     pretty_env_logger::init();
 
     info!("starting lich(operator) version 0.0.1");
-    let listener = TcpListener::bind(SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 10000))
-        .expect("listener");
+    let contents = std::fs::read_to_string("./lich/tests/operator.toml").expect("read config");
+    let config = toml::from_str::<OperatorConfig>(&contents).expect("valid config");
+
+    let listener = TcpListener::bind(SocketAddr::new(
+        IpAddr::V6(Ipv6Addr::LOCALHOST),
+        config.port,
+    ))
+    .expect("listener");
     let pool = ThreadPoolBuilder::new()
         .num_threads(4)
         .build()
@@ -42,9 +52,12 @@ fn main() {
     let cluster = Cluster::default();
 
     for stream in listener.incoming() {
-        pool.install(|| match stream {
+        trace!("incoming");
+        let cluster = cluster.clone();
+        pool.spawn(move || match stream {
             Ok(stream) => {
                 let session = Session::new(stream, 5);
+                info!("new session {:?}", session);
                 let mut read_session = session.clone();
                 loop {
                     match full_decode(&mut read_session) {
@@ -53,18 +66,21 @@ fn main() {
 
                             match request {
                                 System::Join(join) => {
-                                    trace!("join: {:?}", join);
+                                    info!("join: {:?}", join);
                                     if let Err(err) = cluster.add(session.clone(), join) {
                                         error!("cluster.add: {}", err);
                                         continue;
                                     }
                                 }
                                 System::ReportAck(ack) => {
-                                    trace!("report ack: {:?}", ack);
+                                    info!("report ack: {:?}", ack);
                                     // TODO: remove session if ack is not ok!
                                 }
                                 _ => {
-                                    error!("expected join request but got {:?}", request);
+                                    error!(
+                                        "expected join/report_ack request but got {:?}",
+                                        request
+                                    );
                                     continue;
                                 }
                             }
@@ -95,7 +111,7 @@ fn main() {
 // Outgoing will need to have tx+rx for requests and acks. It sends out operator msgs to operator. The rest to next node.
 // Need to read out responses and send acks back to STATE.
 #[cfg(feature = "backend")]
-fn main() {
+fn backend() {
     use std::thread;
 
     use crossbeam::channel::bounded;
@@ -105,8 +121,6 @@ fn main() {
 
     pretty_env_logger::init();
 
-    // let (pusher, popper) =
-    //     ring_buffer(buffer::InMemBuffer::new(util::gigabytes(1)), Version::V1).expect("dequeue");
     info!("starting lich(backend) version 0.0.1");
     let contents = std::fs::read_to_string("./lich/tests/backend.toml").expect("read config");
     let config = toml::from_str::<BackendConfig>(&contents).expect("valid config");
@@ -115,13 +129,29 @@ fn main() {
 
     let (requests_tx, requests_rx) = bounded(1024);
 
-    _ = thread::spawn(|| {
-        Incoming::new(9999, requests_tx).run();
-    });
+    _ = thread::Builder::new()
+        .name("incoming".to_string())
+        .spawn(move || {
+            Incoming::new(config.endpoints.port, requests_tx).run();
+        });
 
     let mut state = State::new(config.endpoints, store, requests_rx);
 
     loop {
         state = state.next();
     }
+}
+
+fn main() {
+    #[cfg(feature = "backend")]
+    backend();
+
+    #[cfg(feature = "operator")]
+    operator();
+
+    #[cfg(feature = "frontend")]
+    unimplemented!("frontend not implemented");
+
+    #[cfg(not(any(feature = "backend", feature = "operator", feature = "frontend")))]
+    panic!("no feature enabled");
 }

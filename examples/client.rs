@@ -1,9 +1,7 @@
-#![cfg(feature = "client")]
-
 use std::{io::Write, println};
 
-use clap::{Args as _, Command as _, Parser};
-use necronomicon::{full_decode, kv_store_codec, Decode, Encode, Header, Kind, Packet};
+use clap::Parser;
+use necronomicon::{full_decode, kv_store_codec, Encode, Header, Kind, Packet};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -29,12 +27,6 @@ enum Command {
     },
 }
 
-fn main() {
-    let cli = Cli::parse();
-
-    send_command(cli.host, cli.port, cli.command);
-}
-
 fn send_command(host: String, port: u16, command: Command) {
     let mut stream = std::net::TcpStream::connect(format!("{host}:{port}")).unwrap();
     let packet: Packet = command.into();
@@ -58,4 +50,10 @@ impl Into<necronomicon::Packet> for Command {
             )),
         }
     }
+}
+
+fn main() {
+    let cli = Cli::parse();
+
+    send_command(cli.host, cli.port, cli.command);
 }

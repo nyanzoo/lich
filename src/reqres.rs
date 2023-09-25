@@ -1,8 +1,6 @@
-use std::{
-    io::{Read, Write},
-    sync::mpsc,
-};
+use std::io::{Read, Write};
 
+use crossbeam::channel::Sender;
 use log::trace;
 
 use necronomicon::{
@@ -257,11 +255,11 @@ where
 #[derive(Debug)]
 pub(crate) struct ProcessRequest {
     pub request: ClientRequest,
-    response_tx: mpsc::Sender<ClientResponse>,
+    response_tx: Sender<ClientResponse>,
 }
 
 impl ProcessRequest {
-    pub(crate) fn new(request: ClientRequest, response_tx: mpsc::Sender<ClientResponse>) -> Self {
+    pub(crate) fn new(request: ClientRequest, response_tx: Sender<ClientResponse>) -> Self {
         Self {
             request,
             response_tx,
@@ -279,7 +277,7 @@ impl ProcessRequest {
 }
 
 pub(crate) struct PendingRequest {
-    response_tx: mpsc::Sender<ClientResponse>,
+    response_tx: Sender<ClientResponse>,
 }
 
 impl PendingRequest {

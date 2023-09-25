@@ -1,7 +1,6 @@
-use std::{
-    io::{Read, Write},
-    net::TcpStream,
-};
+use std::io::{Read, Write};
+
+use crate::stream::TcpStream;
 
 #[derive(Debug)]
 pub struct Session {
@@ -15,7 +14,7 @@ pub struct Session {
 impl Clone for Session {
     fn clone(&self) -> Self {
         Self {
-            stream: self.stream.try_clone().expect("clone"),
+            stream: self.stream.clone(),
             last_seen: self.last_seen,
             keep_alive: self.keep_alive,
         }
@@ -29,6 +28,10 @@ impl Session {
             last_seen: now(),
             keep_alive,
         }
+    }
+
+    pub fn peer_addr(&self) -> String {
+        self.stream.peer_addr()
     }
 
     pub fn is_alive(&self) -> bool {
