@@ -25,6 +25,16 @@ enum Command {
         #[arg(short, long)]
         value: String,
     },
+
+    Get {
+        #[arg(short, long)]
+        key: String,
+    },
+
+    Delete {
+        #[arg(short, long)]
+        key: String,
+    },
 }
 
 fn send_command(host: String, port: u16, command: Command) {
@@ -42,11 +52,20 @@ fn send_command(host: String, port: u16, command: Command) {
 
 impl Into<necronomicon::Packet> for Command {
     fn into(self) -> necronomicon::Packet {
+        let uuid = uuid::Uuid::new_v4().as_u128();
         match self {
             Command::Put { key, value } => Packet::Put(kv_store_codec::Put::new(
-                Header::new(Kind::Put, 1, 1234),
+                Header::new(Kind::Put, 1, uuid),
                 key.try_into().unwrap(),
                 value.as_bytes().to_vec(),
+            )),
+            Command::Get { key } => Packet::Get(kv_store_codec::Get::new(
+                Header::new(Kind::Get, 1, uuid),
+                key.try_into().unwrap(),
+            )),
+            Command::Delete { key } => Packet::Delete(kv_store_codec::Delete::new(
+                Header::new(Kind::Delete, 1, uuid),
+                key.try_into().unwrap(),
             )),
         }
     }

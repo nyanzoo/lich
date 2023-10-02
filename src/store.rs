@@ -4,8 +4,8 @@ use hashlink::LinkedHashMap;
 use log::{trace, warn};
 
 use necronomicon::{
-    Encode, Packet, FAILED_TO_PUSH_TO_TRANSACTION_LOG, INTERNAL_ERROR, KEY_DOES_NOT_EXIST,
-    QUEUE_ALREADY_EXISTS, QUEUE_DOES_NOT_EXIST,
+    system_codec::Transfer, Encode, Header, Kind, Packet, FAILED_TO_PUSH_TO_TRANSACTION_LOG,
+    INTERNAL_ERROR, KEY_DOES_NOT_EXIST, QUEUE_ALREADY_EXISTS, QUEUE_DOES_NOT_EXIST,
 };
 use phylactery::{
     buffer::MmapBuffer,
@@ -141,9 +141,20 @@ impl Store<String> {
         // TODO: make `push_encode`
         patch.encode(&mut tl_patch).expect("must be able to encode");
 
-        if let Err(err) = self.transaction_log_tx.push(tl_patch) {
-            warn!("failed to push to transaction log: {}", err);
-            return patch.nack(FAILED_TO_PUSH_TO_TRANSACTION_LOG);
+        loop {
+            if let Err(err) = self.transaction_log_tx.push(&tl_patch) {
+                if let phylactery::ring_buffer::Error::EntryTooBig { .. } = err {
+                    let mut buf = vec![];
+                    self.transaction_log_rx
+                        .pop(&mut buf)
+                        .expect("must be able to pop");
+                } else {
+                    warn!("failed to push to transaction log: {}", err);
+                    return patch.nack(FAILED_TO_PUSH_TO_TRANSACTION_LOG);
+                }
+            } else {
+                break;
+            }
         }
 
         match patch {
@@ -242,6 +253,19 @@ impl Store<String> {
             // other
             _ => panic!("invalid packet type {patch:?}"),
         }
+    }
+
+    pub(crate) fn deconstruct_iter(&self) -> impl Iterator<Item = Transfer> + '_ {
+        self.kvs.deconstruct_iter().map(|path| {
+            let content = std::fs::read(&path).expect("must be able to read file");
+            let uuid = uuid::Uuid::new_v4().as_u128();
+            let header = Header::new(Kind::Transfer, self.version.into(), uuid);
+            Transfer::new(header, path, content)
+        })
+    }
+
+    pub(crate) fn reconstruct(&self, transfer: &Transfer) {
+        self.kvs.reconstruct(transfer.path(), transfer.content())
     }
 }
 

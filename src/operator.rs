@@ -21,6 +21,7 @@ pub(crate) struct Cluster(Arc<Mutex<ClusterInner>>);
 struct ClusterInner {
     backends: Vec<Backend>,
     frontend: Option<Frontend>,
+    observers: Vec<Session>,
 }
 
 impl ClusterInner {
@@ -59,12 +60,13 @@ impl ClusterInner {
         let id = join.header().uuid();
 
         join.clone().ack().encode(session)?;
+        let addr = join.addr().expect("addr").to_owned();
 
         // Update chain
         // TODO:
         // - need to determine if there is a candidate or more.
         // - if there is a candidate then we need to send the candidate the transaction log.
-        if let Some(mut backend) = self.existing_backend(&join.addr()) {
+        if let Some(mut backend) = self.existing_backend(&addr) {
             // Need to promote to tail and set tail to replica.
             if backend.role == ChainRole::Candidate {
                 // Current tail is now head or replica.
@@ -93,7 +95,7 @@ impl ClusterInner {
                 backend.role = ChainRole::Middle;
             });
             self.backends.push(Backend {
-                addr: join.addr().to_owned(),
+                addr,
                 role: ChainRole::Tail,
                 session: session.clone(),
             });
@@ -131,6 +133,60 @@ impl ClusterInner {
             report.encode(&mut frontend.session)?;
         }
 
+        self.send_backend_reports(session, id)?;
+
+        self.send_observer_reports(id)?;
+
+        Ok(())
+    }
+
+    fn add_frontend(&mut self, session: &mut Session, join: Join) -> Result<(), Error> {
+        let id = join.header().uuid();
+        let addr = join.addr().expect("addr").to_owned();
+        if let Some(head) = self.head() {
+            if let Some(tail) = self.tail() {
+                let report = Report::new(
+                    Header::new(Kind::Report, 1, join.header().uuid()),
+                    Position::Frontend {
+                        head: Some(head.addr.clone()),
+                        tail: Some(tail.addr.clone()),
+                    },
+                );
+                join.ack().encode(session)?;
+                debug!("sending report to frontend: {:?}", report);
+                report.encode(session)?;
+            } else {
+                let report = Report::new(
+                    Header::new(Kind::Report, 1, id),
+                    Position::Frontend {
+                        head: Some(head.addr.clone()),
+                        tail: None,
+                    },
+                );
+                join.ack().encode(session)?;
+                debug!("sending report to frontend: {:?}", report);
+                report.encode(session)?;
+            }
+        } else {
+            join.nack(CHAIN_NOT_READY).encode(session)?;
+            return Ok(());
+        }
+        session.flush()?;
+        self.frontend = Some(Frontend {
+            addr,
+            session: session.clone(),
+        });
+
+        self.send_observer_reports(id)?;
+
+        Ok(())
+    }
+
+    fn add_observer(&mut self, session: Session) {
+        self.observers.push(session);
+    }
+
+    fn send_backend_reports(&mut self, session: &mut Session, id: u128) -> Result<(), Error> {
         // reverse order so the previous node is always the successor!
         let mut prev = None;
         let mut candidate = None;
@@ -179,48 +235,29 @@ impl ClusterInner {
             report.encode(&mut backend.session)?;
         }
 
-        if let Some(candidate) = candidate {
-            Transfer::new(Header::new(Kind::Transfer, 1, id), candidate).encode(session)?;
-        }
-
         Ok(())
     }
 
-    fn add_frontend(&mut self, session: &mut Session, join: Join) -> Result<(), Error> {
-        let addr = join.addr().to_owned();
-        if let Some(head) = self.head() {
-            if let Some(tail) = self.tail() {
-                let report = Report::new(
-                    Header::new(Kind::Report, 1, join.header().uuid()),
-                    Position::Frontend {
-                        head: Some(head.addr.clone()),
-                        tail: Some(tail.addr.clone()),
-                    },
-                );
-                join.ack().encode(session)?;
-                debug!("sending report to frontend: {:?}", report);
-                report.encode(session)?;
-            } else {
-                let report = Report::new(
-                    Header::new(Kind::Report, 1, join.header().uuid()),
-                    Position::Frontend {
-                        head: Some(head.addr.clone()),
-                        tail: None,
-                    },
-                );
-                join.ack().encode(session)?;
-                debug!("sending report to frontend: {:?}", report);
-                report.encode(session)?;
+    // TODO: remove bad sessions
+    fn send_observer_reports(&mut self, id: u128) -> Result<(), Error> {
+        for session in &mut self.observers {
+            let mut chain = Vec::new();
+            for backend in &self.backends {
+                chain.push(Role::Backend(backend.addr.clone()));
             }
-        } else {
-            join.nack(CHAIN_NOT_READY).encode(session)?;
-            return Ok(());
+            if let Some(frontend) = &self.frontend {
+                chain.push(Role::Frontend(frontend.addr.clone()));
+            }
+
+            let report = Report::new(
+                Header::new(Kind::Report, 1, id),
+                Position::Observer { chain },
+            );
+
+            report.encode(session)?;
+
+            session.flush()?;
         }
-        session.flush()?;
-        self.frontend = Some(Frontend {
-            addr,
-            session: session.clone(),
-        });
 
         Ok(())
     }
@@ -253,6 +290,7 @@ impl Cluster {
         Self(Arc::new(Mutex::new(ClusterInner {
             backends: Vec::new(),
             frontend: None,
+            observers: Vec::new(),
         })))
     }
 
@@ -265,6 +303,10 @@ impl Cluster {
         match join.clone().role() {
             Role::Backend(_) => cluster.add_backend(&mut session, join),
             Role::Frontend(_) => cluster.add_frontend(&mut session, join),
+            Role::Observer => {
+                cluster.add_observer(session);
+                cluster.send_observer_reports(join.header().uuid())
+            }
         }
     }
 }

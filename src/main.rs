@@ -122,7 +122,7 @@ fn backend() {
     pretty_env_logger::init();
 
     info!("starting lich(backend) version 0.0.1");
-    let contents = std::fs::read_to_string("./lich/tests/backend.toml").expect("read config");
+    let contents = std::fs::read_to_string("./config/backend.toml").expect("read config");
     let config = toml::from_str::<BackendConfig>(&contents).expect("valid config");
 
     let store = Store::new(&config.store).expect("store");

@@ -12,8 +12,8 @@ use uuid::Uuid;
 
 use crate::{
     config::EndpointConfig,
-    outgoing::Outgoing,
-    reqres::{ClientResponse, PendingRequest, ProcessRequest, System},
+    outgoing::{self, Outgoing},
+    reqres::{ClientResponse, PendingRequest, ProcessRequest, System, ClientRequest},
     store::Store,
     stream::TcpStream,
 };
@@ -138,6 +138,9 @@ impl State {
                     Position::Middle { next } => Some(next),
                     Position::Tail { candidate } => candidate,
                     Position::Candidate => None,
+                    Position::Observer { .. } => {
+                        panic!("got observer position for a backend!")
+                    }
                 };
 
                 let (outgoing, ack_rx) = if let Some(outgoing_addr) = outgoing_addr {
@@ -234,6 +237,10 @@ impl State {
                             }
                             System::Report(report) => {
                                 let new_position = report.position().clone();
+                                operator_tx
+                                    .send(System::ReportAck(report.ack()))
+                                    .expect("operator ack");
+
                                 return Self::Update {
                                     last_position: position,
                                     new_position,
@@ -241,23 +248,6 @@ impl State {
                                     pending,
                                     operator,
                                     ack_rx,
-                                    requests_rx,
-                                    outgoing_tx,
-                                    outgoing,
-                                };
-                            }
-                            System::Transfer(transfer) => {
-                                let (ack_tx, ack_rx) = bounded(CHANNEL_CAPACITY);
-
-                                let (outgoing_tx, outgoing_rx) = bounded(CHANNEL_CAPACITY);
-
-                                let outgoing =
-                                    Some(Outgoing::new(transfer.candidate(), outgoing_rx, ack_tx));
-
-                                return Self::Transfer {
-                                    store,
-                                    operator,
-                                    ack_rx: Some(ack_rx),
                                     requests_rx,
                                     outgoing_tx,
                                     outgoing,
@@ -292,23 +282,39 @@ impl State {
                         let prequest = oper.recv(&requests_rx).expect("recv");
                         trace!("got request: {:?}", prequest);
 
-                        if let Position::Tail { .. } = position {
-                            let mut buf = vec![0; 1024]; // TODO: handle buffer smarter later!
+                        match position {
+                            Position::Candidate => {
+                                
+                                let (request, pending) = prequest.into_parts();
 
-                            let (request, pending) = prequest.into_parts();
-                            trace!("committing patch {request:?}, since we are tail");
-                            let response = store.commit_patch(request, &mut buf);
-                            let response = ClientResponse::from(response);
+                                debug!("got candidate request: {:?}", request);
 
-                            pending.complete(response);
-                        } else {
-                            let id = prequest.request.id();
-                            store.add_to_pending(prequest.request.clone());
+                                let ClientRequest::Transfer(transfer) = request else {
+                                    panic!("expected transfer request but got {:?}", request);
+                                };
 
-                            let (request, pending_request) = prequest.into_parts();
-                            trace!("sending request {request:?} to next node");
-                            outgoing_tx.send(request.into()).expect("send");
-                            pending.insert(id, pending_request);
+                                store.reconstruct(&transfer);
+                                pending.complete(ClientResponse::Transfer(transfer.ack()));
+                            }
+                            Position::Tail { .. } => {
+                                let mut buf = vec![0; 1024]; // TODO: handle buffer smarter later!
+
+                                let (request, pending) = prequest.into_parts();
+                                trace!("committing patch {request:?}, since we are tail");
+                                let response = store.commit_patch(request, &mut buf);
+                                let response = ClientResponse::from(response);
+
+                                pending.complete(response);
+                            }
+                            _ => {
+                                let id = prequest.request.id();
+                                store.add_to_pending(prequest.request.clone());
+
+                                let (request, pending_request) = prequest.into_parts();
+                                trace!("sending request {request:?} to next node");
+                                outgoing_tx.send(request.into()).expect("send");
+                                pending.insert(id, pending_request);
+                            }
                         }
                     }
                     _ => {
@@ -365,6 +371,9 @@ impl State {
                         Position::Middle { next } => Some(next),
                         Position::Tail { candidate } => candidate,
                         Position::Candidate => None,
+                        Position::Observer { .. } => {
+                            panic!("got observer position for a backend!")
+                        }
                     };
 
                     let (outgoing, ack_rx) = if let Some(outgoing_addr) = outgoing_addr {
@@ -378,19 +387,30 @@ impl State {
                         (None, None)
                     };
 
-                    // TODO: handle role change here!
-                    // Outgoing loop should at least be paused?
-                    // If there are changes we might need to close the outgoing loop and start a new one.
-                    Self::Ready {
-                        position: new_position,
-                        store,
-                        not_ready: Default::default(),
-                        pending,
-                        operator,
-                        ack_rx,
-                        requests_rx,
-                        outgoing_tx,
-                        outgoing,
+                    if matches!(new_position, Position::Candidate) {
+                        Self::Transfer {
+                            store,
+                            operator,
+                            ack_rx,
+                            requests_rx,
+                            outgoing_tx,
+                            outgoing,
+                        }
+                    } else {
+                        // TODO: handle role change here!
+                        // Outgoing loop should at least be paused?
+                        // If there are changes we might need to close the outgoing loop and start a new one.
+                        Self::Ready {
+                            position: new_position,
+                            store,
+                            not_ready: Default::default(),
+                            pending,
+                            operator,
+                            ack_rx,
+                            requests_rx,
+                            outgoing_tx,
+                            outgoing,
+                        }
                     }
                 }
             }
@@ -403,7 +423,40 @@ impl State {
                 outgoing_tx,
                 outgoing,
             } => {
-                todo!()
+                // TODO: handle transfer change here!
+                if let Some(outgoing) = outgoing {
+                    info!("transfering store to {:?}", outgoing.addr);
+                    // TODO: if we don't want to nuke the store we will need to send versions!
+                    for transfer in store.deconstruct_iter() {
+                        outgoing_tx.send(Packet::Transfer(transfer)).expect("send");
+                    }
+
+                    Self::Ready {
+                        position: Position::Middle {
+                            next: outgoing.addr.clone(),
+                        },
+                        store,
+                        not_ready: Default::default(),
+                        pending: Default::default(),
+                        operator,
+                        ack_rx,
+                        requests_rx,
+                        outgoing_tx,
+                        outgoing: Some(outgoing),
+                    }
+                } else {
+                    Self::Ready {
+                        position: Position::Tail { candidate: None },
+                        store,
+                        not_ready: Default::default(),
+                        pending: Default::default(),
+                        operator,
+                        ack_rx,
+                        requests_rx,
+                        outgoing_tx,
+                        outgoing,
+                    }
+                }
             }
         }
     }

@@ -62,20 +62,29 @@ pub(crate) enum ClientRequest {
     Put(Put),
     Get(Get),
     Delete(kv_store_codec::Delete),
+
+    // transfer
+    Transfer(Transfer),
 }
 
 impl Into<Packet> for ClientRequest {
     fn into(self) -> Packet {
         match self {
+            // dequeue
             ClientRequest::CreateQueue(packet) => Packet::CreateQueue(packet),
             ClientRequest::DeleteQueue(packet) => Packet::DeleteQueue(packet),
             ClientRequest::Enqueue(packet) => Packet::Enqueue(packet),
             ClientRequest::Dequeue(packet) => Packet::Dequeue(packet),
             ClientRequest::Peek(packet) => Packet::Peek(packet),
             ClientRequest::Len(packet) => Packet::Len(packet),
+
+            // kv store
             ClientRequest::Put(packet) => Packet::Put(packet),
             ClientRequest::Get(packet) => Packet::Get(packet),
             ClientRequest::Delete(packet) => Packet::Delete(packet),
+
+            // transfer
+            ClientRequest::Transfer(packet) => Packet::Transfer(packet),
         }
     }
 }
@@ -83,20 +92,27 @@ impl Into<Packet> for ClientRequest {
 impl ClientRequest {
     pub fn id(&self) -> u128 {
         match self {
+            // dequeue
             ClientRequest::CreateQueue(packet) => packet.header().uuid(),
             ClientRequest::DeleteQueue(packet) => packet.header().uuid(),
             ClientRequest::Enqueue(packet) => packet.header().uuid(),
             ClientRequest::Dequeue(packet) => packet.header().uuid(),
             ClientRequest::Peek(packet) => packet.header().uuid(),
             ClientRequest::Len(packet) => packet.header().uuid(),
+
+            // kv store
             ClientRequest::Put(packet) => packet.header().uuid(),
             ClientRequest::Get(packet) => packet.header().uuid(),
             ClientRequest::Delete(packet) => packet.header().uuid(),
+
+            // transfer
+            ClientRequest::Transfer(packet) => packet.header().uuid(),
         }
     }
 
     pub fn nack(self, response_code: u8) -> Packet {
         match self {
+            // dequeue
             ClientRequest::CreateQueue(packet) => {
                 Packet::CreateQueueAck(packet.nack(response_code))
             }
@@ -107,9 +123,14 @@ impl ClientRequest {
             ClientRequest::Dequeue(packet) => Packet::DequeueAck(packet.nack(response_code)),
             ClientRequest::Peek(packet) => Packet::PeekAck(packet.nack(response_code)),
             ClientRequest::Len(packet) => Packet::LenAck(packet.nack(response_code)),
+
+            // kv store
             ClientRequest::Put(packet) => Packet::PutAck(packet.nack(response_code)),
             ClientRequest::Get(packet) => Packet::GetAck(packet.nack(response_code)),
             ClientRequest::Delete(packet) => Packet::DeleteAck(packet.nack(response_code)),
+
+            // transfer
+            ClientRequest::Transfer(packet) => Packet::TransferAck(packet.nack(response_code)),
         }
     }
 }
@@ -120,15 +141,21 @@ where
 {
     fn encode(&self, writer: &mut W) -> Result<(), necronomicon::Error> {
         match self {
+            // dequeue
             ClientRequest::CreateQueue(packet) => packet.encode(writer),
             ClientRequest::DeleteQueue(packet) => packet.encode(writer),
             ClientRequest::Enqueue(packet) => packet.encode(writer),
             ClientRequest::Dequeue(packet) => packet.encode(writer),
             ClientRequest::Peek(packet) => packet.encode(writer),
             ClientRequest::Len(packet) => packet.encode(writer),
+
+            // kv store
             ClientRequest::Put(packet) => packet.encode(writer),
             ClientRequest::Get(packet) => packet.encode(writer),
             ClientRequest::Delete(packet) => packet.encode(writer),
+
+            // system
+            ClientRequest::Transfer(packet) => packet.encode(writer),
         }
     }
 }
@@ -196,11 +223,15 @@ pub(crate) enum ClientResponse {
     Put(PutAck),
     Get(GetAck),
     Delete(kv_store_codec::DeleteAck),
+
+    // transfer
+    Transfer(TransferAck),
 }
 
 impl Ack for ClientResponse {
     fn header(&self) -> &Header {
         match self {
+            // dequeue
             ClientResponse::CreateQueue(ack) => ack.header(),
             ClientResponse::DeleteQueue(ack) => ack.header(),
             ClientResponse::Enqueue(ack) => ack.header(),
@@ -208,14 +239,19 @@ impl Ack for ClientResponse {
             ClientResponse::Peek(ack) => ack.header(),
             ClientResponse::Len(ack) => ack.header(),
 
+            // kv store
             ClientResponse::Put(ack) => ack.header(),
             ClientResponse::Get(ack) => ack.header(),
             ClientResponse::Delete(ack) => ack.header(),
+
+            // system
+            ClientResponse::Transfer(ack) => ack.header(),
         }
     }
 
     fn response_code(&self) -> u8 {
         match self {
+            // dequeue
             ClientResponse::CreateQueue(ack) => ack.response_code(),
             ClientResponse::DeleteQueue(ack) => ack.response_code(),
             ClientResponse::Enqueue(ack) => ack.response_code(),
@@ -223,9 +259,13 @@ impl Ack for ClientResponse {
             ClientResponse::Peek(ack) => ack.response_code(),
             ClientResponse::Len(ack) => ack.response_code(),
 
+            // kv store
             ClientResponse::Put(ack) => ack.response_code(),
             ClientResponse::Get(ack) => ack.response_code(),
             ClientResponse::Delete(ack) => ack.response_code(),
+
+            // system
+            ClientResponse::Transfer(ack) => ack.response_code(),
         }
     }
 }
@@ -248,6 +288,9 @@ where
             ClientResponse::Put(ack) => ack.encode(writer),
             ClientResponse::Get(ack) => ack.encode(writer),
             ClientResponse::Delete(ack) => ack.encode(writer),
+
+            // system
+            ClientResponse::Transfer(ack) => ack.encode(writer),
         }
     }
 }

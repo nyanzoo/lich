@@ -14,6 +14,7 @@ pub(super) struct Outgoing {
     write: std::thread::JoinHandle<()>,
 
     stream: TcpStream,
+    pub addr: String,
 }
 
 impl Drop for Outgoing {
@@ -77,6 +78,7 @@ impl Outgoing {
             write: write_handle,
 
             stream,
+            addr,
         }
     }
 }
