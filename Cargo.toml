@@ -3,11 +3,16 @@ edition = "2021"
 name = "lich"
 version = "0.1.0"
 
+[profile.test]
+test-threads = 1
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 crossbeam = "0.8"
 hashlink = "0.8"
+kube = { version = "0.86", features = ["runtime", "derive"], optional = true }
+k8s-openapi = { version = "0.20", features = ["latest"], optional = true }
 log = "0.4"
 parking_lot = "0.12"
 pretty_env_logger = "0.5"
@@ -17,22 +22,25 @@ thiserror = "1.0"
 toml = "0.8"
 uuid = { version = "1.4", features = ["serde", "v4"] }
 
-# necronomicon = {git = "https://github.com/nyanzoo/necronomicon"}
-necronomicon = { path = "../necronomicon" }
-# phylactery = {git = "https://github.com/nyanzoo/phylactery"}
-phylactery = { path = "../phylactery" }
+necronomicon = { git = "https://github.com/nyanzoo/necronomicon", branch = "master" }
+# necronomicon = { path = "../necronomicon" }
+phylactery = { git = "https://github.com/nyanzoo/phylactery", branch = "develop" }
+# phylactery = { path = "../phylactery" }
 
 
 [dev-dependencies]
 clap = { version = "4.4", features = ["derive"] }
 lazy_static = "1.4"
+matches = "0.1"
 tempfile = "3.8"
 
 [features]
-default = []
+default = ["operator"]
 # clients
 client = []
 # servers
 backend = []
 frontend = []
 operator = []
+# controller
+controller = ["kube", "k8s-openapi"]

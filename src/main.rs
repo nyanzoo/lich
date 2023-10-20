@@ -1,23 +1,21 @@
-// mod acks;
+mod common;
 mod config;
 mod error;
 
-#[cfg(feature = "backend")]
-mod incoming;
+#[cfg(feature = "controller")]
+mod controller;
 
 #[cfg(feature = "operator")]
 mod operator;
 
-mod outgoing;
-mod reqres;
-mod session;
-
 #[cfg(feature = "backend")]
-mod state;
+mod backend;
 
-mod store;
-mod stream;
-mod util;
+#[cfg(feature = "frontend")]
+mod frontend;
+
+#[cfg(feature = "controller")]
+fn controller() {}
 
 #[cfg(feature = "operator")]
 fn operator() {
@@ -29,8 +27,9 @@ fn operator() {
     use necronomicon::full_decode;
 
     use crate::{
-        config::OperatorConfig, operator::Cluster, reqres::System, session::Session,
-        stream::TcpListener,
+        common::{reqres::System, session::Session, stream::TcpListener},
+        config::OperatorConfig,
+        operator::Cluster,
     };
 
     pretty_env_logger::init();
@@ -117,12 +116,15 @@ fn backend() {
     use crossbeam::channel::bounded;
     use log::info;
 
-    use crate::{config::BackendConfig, incoming::Incoming, state::State, store::Store};
+    use crate::{
+        backend::{incoming::Incoming, state::State, store::Store},
+        config::BackendConfig,
+    };
 
     pretty_env_logger::init();
 
     info!("starting lich(backend) version 0.0.1");
-    let contents = std::fs::read_to_string("./config/backend.toml").expect("read config");
+    let contents = std::fs::read_to_string("/etc/lich.toml").expect("read config");
     let config = toml::from_str::<BackendConfig>(&contents).expect("valid config");
 
     let store = Store::new(&config.store).expect("store");
@@ -142,7 +144,15 @@ fn backend() {
     }
 }
 
+#[cfg(feature = "frontend")]
+fn frontend() {
+    unimplemented!("frontend not implemented");
+}
+
 fn main() {
+    #[cfg(feature = "controller")]
+    controller();
+
     #[cfg(feature = "backend")]
     backend();
 
@@ -150,8 +160,7 @@ fn main() {
     operator();
 
     #[cfg(feature = "frontend")]
-    unimplemented!("frontend not implemented");
+    frontend();
 
-    #[cfg(not(any(feature = "backend", feature = "operator", feature = "frontend")))]
-    panic!("no feature enabled");
+    log::info!("exiting");
 }

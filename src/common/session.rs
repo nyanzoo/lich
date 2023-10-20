@@ -1,6 +1,6 @@
 use std::io::{Read, Write};
 
-use crate::stream::TcpStream;
+use crate::common::stream::TcpStream;
 
 #[derive(Debug)]
 pub struct Session {

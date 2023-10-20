@@ -15,7 +15,11 @@ use phylactery::{
     ring_buffer::{self, ring_buffer},
 };
 
-use crate::{config::StoreConfig, error::Error, reqres::ClientRequest, util::megabytes};
+use crate::{
+    common::{megabytes, reqres::ClientRequest},
+    config::StoreConfig,
+    error::Error,
+};
 
 #[derive(Clone, Debug)]
 enum CommitStatus {
@@ -228,6 +232,7 @@ impl Store<String> {
             ClientRequest::Put(put) => match self.kvs.insert(put.key().clone(), put.value()) {
                 Ok(_) => Packet::PutAck(put.ack()),
                 Err(err) => {
+                    println!("failed to insert into kv store: {}", err);
                     warn!("failed to insert into kv store: {}", err);
                     Packet::PutAck(put.nack(INTERNAL_ERROR))
                 }
@@ -283,7 +288,7 @@ mod tests {
         Header, Kind, Packet,
     };
 
-    use crate::{config::StoreConfig, reqres::ClientRequest};
+    use crate::{common::reqres::ClientRequest, config::StoreConfig};
 
     use super::Store;
 

@@ -1,3 +1,7 @@
+pub mod reqres;
+pub mod session;
+pub mod stream;
+
 pub(super) fn bytes(bytes: u64) -> u64 {
     bytes
 }

@@ -9,6 +9,6 @@ pub enum Error {
     #[error("phylactery error {0}")]
     Phylactery(#[from] phylactery::Error),
 
-    #[error("queue {0} does not exist")]
-    QueueDoesNotExist(String),
+    #[error("connection error")]
+    Connection,
 }

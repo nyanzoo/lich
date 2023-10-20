@@ -14,7 +14,7 @@ use necronomicon::{
 };
 
 #[derive(Clone, Debug)]
-pub(crate) enum System {
+pub enum System {
     Join(Join),
     JoinAck(JoinAck),
 
@@ -49,7 +49,7 @@ impl From<Packet> for System {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) enum ClientRequest {
+pub enum ClientRequest {
     // dequeue
     CreateQueue(Create),
     DeleteQueue(dequeue_codec::Delete),
@@ -210,7 +210,7 @@ where
 }
 
 #[derive(Debug)]
-pub(crate) enum ClientResponse {
+pub enum ClientResponse {
     // dequeue
     CreateQueue(CreateAck),
     DeleteQueue(dequeue_codec::DeleteAck),
@@ -296,20 +296,20 @@ where
 }
 
 #[derive(Debug)]
-pub(crate) struct ProcessRequest {
+pub struct ProcessRequest {
     pub request: ClientRequest,
     response_tx: Sender<ClientResponse>,
 }
 
 impl ProcessRequest {
-    pub(crate) fn new(request: ClientRequest, response_tx: Sender<ClientResponse>) -> Self {
+    pub fn new(request: ClientRequest, response_tx: Sender<ClientResponse>) -> Self {
         Self {
             request,
             response_tx,
         }
     }
 
-    pub(crate) fn into_parts(self) -> (ClientRequest, PendingRequest) {
+    pub fn into_parts(self) -> (ClientRequest, PendingRequest) {
         (
             self.request,
             PendingRequest {
@@ -319,12 +319,12 @@ impl ProcessRequest {
     }
 }
 
-pub(crate) struct PendingRequest {
+pub struct PendingRequest {
     response_tx: Sender<ClientResponse>,
 }
 
 impl PendingRequest {
-    pub(crate) fn complete(self, response: ClientResponse) {
+    pub fn complete(self, response: ClientResponse) {
         trace!("sending response: {:?}", response);
         self.response_tx.send(response).expect("send");
     }

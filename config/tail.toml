@@ -1,9 +1,0 @@
-[endpoints]
-port = 9999
-operator_addr = 'localhost:10000'
-
-[store]
-path = './lich/delete/3/'
-meta_size = 1024
-node_size = 1048576
-version = 1

@@ -6,21 +6,23 @@ use log::{debug, info, trace, warn};
 use necronomicon::{
     full_decode,
     system_codec::{Join, Position, Role},
-    Ack, Encode, Header, Kind, Packet, SUCCESS,
+    Ack, Encode, Header, Kind, Packet,
 };
 use uuid::Uuid;
 
 use crate::{
+    common::{
+        reqres::{ClientRequest, ClientResponse, PendingRequest, ProcessRequest, System},
+        stream::TcpStream,
+    },
     config::EndpointConfig,
-    outgoing::{self, Outgoing},
-    reqres::{ClientResponse, PendingRequest, ProcessRequest, System, ClientRequest},
-    store::Store,
-    stream::TcpStream,
 };
+
+use super::{outgoing::Outgoing, store::Store};
 
 const CHANNEL_CAPACITY: usize = 1024;
 
-pub(super) enum State {
+pub enum State {
     Init {
         store: Store<String>,
 
@@ -79,7 +81,7 @@ pub(super) enum State {
 }
 
 impl State {
-    pub(super) fn new(
+    pub fn new(
         endpoint_config: EndpointConfig,
         store: Store<String>,
         requests_rx: Receiver<ProcessRequest>,
@@ -92,7 +94,7 @@ impl State {
         }
     }
 
-    pub(super) fn next(self) -> Self {
+    pub fn next(self) -> Self {
         match self {
             Self::Init {
                 endpoint_config,
@@ -146,10 +148,17 @@ impl State {
                 let (outgoing, ack_rx) = if let Some(outgoing_addr) = outgoing_addr {
                     let (ack_tx, ack_rx) = bounded(CHANNEL_CAPACITY);
                     trace!("creating outgoing to {}", outgoing_addr);
-                    (
-                        Some(Outgoing::new(outgoing_addr, outgoing_rx, ack_tx)),
-                        Some(ack_rx),
-                    )
+                    let Ok(outgoint) = Outgoing::new(outgoing_addr.clone(), outgoing_rx, ack_tx)
+                    else {
+                        warn!("failed to create outgoing to {}", outgoing_addr);
+                        return Self::WaitingForOperator {
+                            store,
+                            operator,
+                            requests_rx,
+                        };
+                    };
+
+                    (Some(outgoint), Some(ack_rx))
                 } else {
                     (None, None)
                 };
@@ -284,7 +293,6 @@ impl State {
 
                         match position {
                             Position::Candidate => {
-                                
                                 let (request, pending) = prequest.into_parts();
 
                                 debug!("got candidate request: {:?}", request);
@@ -312,7 +320,15 @@ impl State {
 
                                 let (request, pending_request) = prequest.into_parts();
                                 trace!("sending request {request:?} to next node");
-                                outgoing_tx.send(request.into()).expect("send");
+                                if outgoing_tx.send(request.into()).is_err() {
+                                    warn!("failed to send request to next node");
+                                    return Self::WaitingForOperator {
+                                        store,
+                                        operator,
+                                        requests_rx,
+                                    };
+                                }
+
                                 pending.insert(id, pending_request);
                             }
                         }
@@ -379,10 +395,17 @@ impl State {
                     let (outgoing, ack_rx) = if let Some(outgoing_addr) = outgoing_addr {
                         let (ack_tx, ack_rx) = bounded(CHANNEL_CAPACITY);
                         trace!("creating outgoing to {}", outgoing_addr);
-                        (
-                            Some(Outgoing::new(outgoing_addr, outgoing_rx, ack_tx)),
-                            Some(ack_rx),
-                        )
+
+                        if let Ok(outgoing) = Outgoing::new(outgoing_addr.clone(), outgoing_rx, ack_tx) {
+                            (Some(outgoing), Some(ack_rx))
+                        } else {
+                            warn!("failed to create outgoing to {}", outgoing_addr);
+                            return Self::WaitingForOperator {
+                                store,
+                                operator,
+                                requests_rx,
+                            };
+                        }
                     } else {
                         (None, None)
                     };

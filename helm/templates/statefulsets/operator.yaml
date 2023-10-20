@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: StatefulSet
+metadata:
+  name: lich-operator-statefulset
+spec:
+  selector:
+    matchLabels:
+      app: lich-operator
+  serviceName: lich-operator-service
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: lich-operator
+    spec:
+      containers:
+        - name: lich-operator
+          image: nyanzebra/operator
+          volumeMounts:
+            - name: operator
+              mountPath: /etc/lich
+              readOnly: true
+          resources:
+            limits:
+              memory: "128Mi"
+              cpu: "500m"
+          ports:
+            - containerPort: 6666
+      volumes:
+        - name: operator
+          configMap:
+            name: operator

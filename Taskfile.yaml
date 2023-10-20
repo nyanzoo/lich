@@ -1,0 +1,61 @@
+version: 3
+
+tasks:
+  clippy:
+    cmds:
+      - cargo clippy --all-targets --all-features -- -D warnings
+
+  build-release:
+    internal: true
+    cmds:
+      - cargo build --release --features {{.FEATURE}}
+
+  build-backend-release:
+    cmds:
+      - task: build-release
+        vars:
+          FEATURE: backend
+
+  build-frontend-release:
+    cmds:
+      - task: build-release
+        vars:
+          FEATURE: frontend
+
+  build-operator-release:
+    cmds:
+      - task: build-release
+        vars:
+          FEATURE: operator
+
+  build-image:
+    internal: true
+    cmds:
+      - docker build --build-arg="feature={{.FEATURE}}" -f Dockerfile -t {{.DOCKER_IMAGE}} .
+
+  build-backend-image:
+    cmds:
+      - task: build-image
+        vars:
+          DOCKER_IMAGE: lich-backend
+          FEATURE: backend
+
+  build-frontend-image:
+    cmds:
+      - task: build-image
+        vars:
+          DOCKER_IMAGE: lich-frontend
+          FEATURE: frontend
+
+  build-operator-image:
+    cmds:
+      - task: build-image
+        vars:
+          DOCKER_IMAGE: lich-operator
+          FEATURE: operator
+
+  build-all-images:
+    cmds:
+      - task: build-backend-image
+      - task: build-frontend-image
+      - task: build-operator-image

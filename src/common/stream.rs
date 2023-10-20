@@ -7,6 +7,7 @@ pub mod mock {
         io::{Read, Write},
         rc::Rc,
         sync::Arc,
+        time::Duration,
     };
 
     use necronomicon::{Encode, Packet};
@@ -21,6 +22,29 @@ pub mod mock {
         for addr in addrs {
             ACCEPTS.push(addr.to_string());
         }
+    }
+
+    /// By default, all addresses are accepted.
+    /// This function allows you to gaurantee that an address will be rejected with the given error.
+    pub fn gaurantee_address_rejection<S>(addr: S, err: std::io::ErrorKind)
+    where
+        S: ToString,
+    {
+        CONNECTIONS.insert(addr.to_string(), Connection::Reject(err))
+    }
+
+    /// Retrieves the connection for the given address.
+    /// If the address has not been accepted, it will return `None`.
+    pub fn get_connection<S>(addr: S) -> Option<TcpStream>
+    where
+        S: ToString,
+    {
+        CONNECTIONS
+            .get(addr.to_string())
+            .map(|connection| match connection {
+                Connection::Accept(stream) => stream.clone(),
+                Connection::Reject(err) => panic!("address rejected with error: {:?}", err),
+            })
     }
 
     #[derive(Default)]
@@ -58,14 +82,14 @@ pub mod mock {
             }
         }
 
-        pub fn get(&self, addr: String) -> Option<TcpStream> {
+        pub fn get(&self, addr: String) -> Option<Connection> {
             let inner = self.inner.lock();
             inner.connections.get(&addr).cloned()
         }
 
-        pub fn insert(&self, addr: String, stream: TcpStream) {
+        pub fn insert(&self, addr: String, connection: Connection) {
             let mut inner = self.inner.lock();
-            inner.connections.insert(addr, stream);
+            inner.connections.insert(addr, connection);
         }
 
         pub fn remove(&self, addr: String) {
@@ -74,9 +98,15 @@ pub mod mock {
         }
     }
 
+    #[derive(Clone)]
+    pub enum Connection {
+        Accept(TcpStream),
+        Reject(std::io::ErrorKind),
+    }
+
     #[derive(Default)]
     struct InnerConnections {
-        connections: HashMap<String, TcpStream>,
+        connections: HashMap<String, Connection>,
     }
 
     #[derive(Clone, Debug)]
@@ -143,14 +173,17 @@ pub mod mock {
         {
             let addr = addr.to_string();
             if let Some(stream) = CONNECTIONS.get(addr.clone()) {
-                return Ok(stream);
+                match stream {
+                    Connection::Accept(stream) => return Ok(stream.clone()),
+                    Connection::Reject(err) => return Err(std::io::Error::from(err.clone())),
+                }
             }
 
             let stream = Self {
                 inner: Arc::new(Mutex::new(TcpStreamInner::new(addr.clone()))),
             };
 
-            CONNECTIONS.insert(addr, stream.clone());
+            CONNECTIONS.insert(addr, Connection::Accept(stream.clone()));
             Ok(stream)
         }
 
@@ -179,17 +212,23 @@ pub mod mock {
         }
 
         pub fn shutdown(&self, _: std::net::Shutdown) -> std::io::Result<()> {
-            unimplemented!("shutdown")
+            Ok(())
         }
     }
 
     impl Read for TcpStream {
         fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-            let mut inner = self.inner.lock();
-            let read = &mut inner.read;
-            let len = cmp::min(buf.len(), read.len());
-            buf[..len].copy_from_slice(&read[..len]);
-            read.drain(..len);
+            let len = loop {
+                let mut inner = self.inner.lock();
+                let read = &mut inner.read;
+                let len = cmp::min(buf.len(), read.len());
+                buf[..len].copy_from_slice(&read[..len]);
+                read.drain(..len);
+                if len > 0 {
+                    break len;
+                };
+                std::thread::sleep(Duration::from_millis(100));
+            };
             Ok(len)
         }
     }

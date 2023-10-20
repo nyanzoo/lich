@@ -1,0 +1,17 @@
+backend:
+  image: nyanzebra/backend
+  replicas: 3
+  store: |
+    [endpoints]
+    port=6666
+
+    [store]
+    path = '/etc/lich/store'
+    meta_size = 1024
+    node_size = 1048576
+    version = 1
+frontend:
+  image: nyanzebra/frontend
+  replicas: 3
+operator:
+  image: nyanzebra/operator
