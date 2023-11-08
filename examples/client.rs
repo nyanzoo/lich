@@ -1,7 +1,7 @@
 use std::{io::Write, println};
 
 use clap::Parser;
-use necronomicon::{full_decode, kv_store_codec, Encode, Header, Kind, Packet};
+use necronomicon::{full_decode, kv_store_codec, Encode, Packet};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -55,16 +55,15 @@ impl Into<necronomicon::Packet> for Command {
         let uuid = uuid::Uuid::new_v4().as_u128();
         match self {
             Command::Put { key, value } => Packet::Put(kv_store_codec::Put::new(
-                Header::new(Kind::Put, 1, uuid),
+                (1, uuid),
                 key.try_into().unwrap(),
                 value.as_bytes().to_vec(),
             )),
-            Command::Get { key } => Packet::Get(kv_store_codec::Get::new(
-                Header::new(Kind::Get, 1, uuid),
-                key.try_into().unwrap(),
-            )),
+            Command::Get { key } => {
+                Packet::Get(kv_store_codec::Get::new((1, uuid), key.try_into().unwrap()))
+            }
             Command::Delete { key } => Packet::Delete(kv_store_codec::Delete::new(
-                Header::new(Kind::Delete, 1, uuid),
+                (1, uuid),
                 key.try_into().unwrap(),
             )),
         }

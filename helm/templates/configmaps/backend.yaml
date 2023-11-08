@@ -1,6 +1,6 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: backend
+  name: backend-config
 data:
-  store: {{ .Values.backend.store | quote }}
+  lich.toml: {{ .Values.backend.config | quote }}

@@ -13,6 +13,11 @@ pub struct BackendConfig {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct FrontendConfig {
+    pub endpoints: EndpointConfig,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct StoreConfig {
     pub path: String,
 

@@ -3,59 +3,162 @@ version: 3
 tasks:
   clippy:
     cmds:
-      - cargo clippy --all-targets --all-features -- -D warnings
+    - cargo clippy --all-targets --all-features -- -D warnings
 
   build-release:
     internal: true
     cmds:
-      - cargo build --release --features {{.FEATURE}}
+    - cargo build --release --features {{.FEATURE}}
 
   build-backend-release:
     cmds:
-      - task: build-release
-        vars:
-          FEATURE: backend
+    - task: build-release
+      vars:
+        FEATURE: backend
 
   build-frontend-release:
     cmds:
-      - task: build-release
-        vars:
-          FEATURE: frontend
+    - task: build-release
+      vars:
+        FEATURE: frontend
 
   build-operator-release:
     cmds:
-      - task: build-release
-        vars:
-          FEATURE: operator
+    - task: build-release
+      vars:
+        FEATURE: operator
 
   build-image:
     internal: true
     cmds:
-      - docker build --build-arg="feature={{.FEATURE}}" -f Dockerfile -t {{.DOCKER_IMAGE}} .
+    - docker build -f Dockerfile -t {{.DOCKER_IMAGE}} -f Dockerfile.{{.FEATURE}} .
 
   build-backend-image:
     cmds:
-      - task: build-image
-        vars:
-          DOCKER_IMAGE: lich-backend
-          FEATURE: backend
+    - task: build-image
+      vars:
+        DOCKER_IMAGE: backend
+        FEATURE: backend
 
   build-frontend-image:
     cmds:
-      - task: build-image
-        vars:
-          DOCKER_IMAGE: lich-frontend
-          FEATURE: frontend
+    - task: build-image
+      vars:
+        DOCKER_IMAGE: frontend
+        FEATURE: frontend
 
   build-operator-image:
     cmds:
-      - task: build-image
-        vars:
-          DOCKER_IMAGE: lich-operator
-          FEATURE: operator
+    - task: build-image
+      vars:
+        DOCKER_IMAGE: operator
+        FEATURE: operator
 
   build-all-images:
     cmds:
-      - task: build-backend-image
-      - task: build-frontend-image
-      - task: build-operator-image
+    - task: build-backend-image
+    - task: build-frontend-image
+    - task: build-operator-image
+
+  tag-image:
+    internal: true
+    cmds:
+    - docker tag {{.DOCKER_IMAGE}} nyanzebra/{{.DOCKER_IMAGE}}:{{.VERSION}}
+
+  tag-backend-image:
+    cmds:
+    - task: tag-image
+      vars:
+        DOCKER_IMAGE: backend
+        VERSION: latest
+
+  tag-frontend-image:
+    cmds:
+    - task: tag-image
+      vars:
+        DOCKER_IMAGE: frontend
+        VERSION: latest
+
+  tag-operator-image:
+    cmds:
+    - task: tag-image
+      vars:
+        DOCKER_IMAGE: operator
+        VERSION: latest
+
+  tag-all-images:
+    cmds:
+    - task: tag-backend-image
+    - task: tag-frontend-image
+    - task: tag-operator-image
+
+  push-image:
+    internal: true
+    cmds:
+    - docker push nyanzebra/{{.DOCKER_IMAGE}}:{{.VERSION}}
+
+  push-backend-image:
+    cmds:
+    - task: push-image
+      vars:
+        DOCKER_IMAGE: backend
+        VERSION: latest
+
+  push-frontend-image:
+    cmds:
+    - task: push-image
+      vars:
+        DOCKER_IMAGE: frontend
+        VERSION: latest
+
+  push-operator-image:
+    cmds:
+    - task: push-image
+      vars:
+        DOCKER_IMAGE: operator
+        VERSION: latest
+
+  push-all-images:
+    cmds:
+    - task: push-backend-image
+    - task: push-frontend-image
+    - task: push-operator-image
+
+  helm-package:
+    cmds:
+    - helm package helm
+
+  helm-install:
+    cmds:
+    - task: helm-package
+    - helm install lich lich-0.1.0.tgz
+
+  helm-uninstall:
+    cmds:
+    - helm uninstall lich
+
+  helm-reinstall:
+    cmds:
+    - task: helm-uninstall
+    - task: helm-install
+
+  deploy:
+    cmds:
+    - task: build-all-images
+    - task: tag-all-images
+    - task: push-all-images
+    - task: helm-install
+
+  redeploy:
+    cmds:
+    - task: build-all-images
+    - task: tag-all-images
+    - task: push-all-images
+    - task: helm-uninstall
+    - task: helm-install
+
+  cluster-recreate:
+    cmds:
+    - k3d cluster delete lich
+    - k3d cluster create lich
+

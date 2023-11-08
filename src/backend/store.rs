@@ -1,11 +1,17 @@
-use std::{collections::BTreeMap, fs::remove_dir, path::PathBuf};
+use std::{
+    collections::BTreeMap,
+    fs::{create_dir_all, read, remove_dir},
+    io::Cursor,
+    path::PathBuf,
+};
 
 use hashlink::LinkedHashMap;
 use log::{trace, warn};
 
 use necronomicon::{
-    system_codec::Transfer, Encode, Header, Kind, Packet, FAILED_TO_PUSH_TO_TRANSACTION_LOG,
-    INTERNAL_ERROR, KEY_DOES_NOT_EXIST, QUEUE_ALREADY_EXISTS, QUEUE_DOES_NOT_EXIST,
+    kv_store_codec::Key, system_codec::Transfer, Decode, Encode, Packet,
+    FAILED_TO_PUSH_TO_TRANSACTION_LOG, INTERNAL_ERROR, KEY_DOES_NOT_EXIST, QUEUE_ALREADY_EXISTS,
+    QUEUE_DOES_NOT_EXIST,
 };
 use phylactery::{
     buffer::MmapBuffer,
@@ -47,7 +53,8 @@ where
 {
     kvs: KVStore<S>,
     root: String,
-    version: Version,
+    api_version: Version,
+    store_version: u128,
     dequeues: BTreeMap<S, Dequeue<S>>,
     pending: hashlink::LinkedHashMap<u128, CommitStatus>,
     transaction_log_tx: ring_buffer::Pusher<MmapBuffer>,
@@ -67,15 +74,23 @@ impl Store<String> {
     /// # Errors
     /// See `error::Error` for details.
     pub fn new(config: &StoreConfig) -> Result<Self, Error> {
+        let dir_all_res = create_dir_all(&config.path);
+        trace!("creating store at {}, res {:?}", config.path, dir_all_res);
+
         let mmap_path = format!("{}/mmap.bin", config.path);
 
-        let version = Version::try_from(config.version).expect("valid version");
+        let api_version = Version::try_from(config.version).expect("valid version");
 
-        let mmap = MmapBuffer::new(mmap_path, megabytes(1))?;
-        let (pusher, popper) = ring_buffer(mmap, version).map_err(phylactery::Error::RingBuffer)?;
+        trace!("creating mmap buffer at {}", mmap_path);
+        let mmap = MmapBuffer::new(mmap_path, megabytes(1)).expect("mmap buffer");
+        trace!("create push and pop for graveyard");
+        let (pusher, popper) =
+            ring_buffer(mmap, api_version).map_err(phylactery::Error::RingBuffer)?;
 
-        let graveyard_path = format!("{}/graveyard.bin", config.path);
+        let graveyard_path = format!("{}/graveyard", config.path);
         let graveyard_path = PathBuf::from(graveyard_path);
+        trace!("creating graveyard at {graveyard_path:?}");
+        _ = create_dir_all(&graveyard_path);
 
         let graveyard = Graveyard::new(graveyard_path, popper);
 
@@ -84,18 +99,45 @@ impl Store<String> {
         });
 
         let meta_path = format!("{}/meta.bin", config.path);
-        let data_path = format!("{}/kvdata/", config.path);
+        let data_path = format!("{}/kvdata", config.path);
         let tl_path = format!("{}/tl.bin", config.path);
-
+        trace!("creating transaction log at {}", tl_path);
         let mmap = MmapBuffer::new(tl_path, megabytes(1))?;
 
         let (transaction_log_tx, transaction_log_rx) =
-            ring_buffer(mmap, version).map_err(phylactery::Error::RingBuffer)?;
+            ring_buffer(mmap, api_version).map_err(phylactery::Error::RingBuffer)?;
+
+        trace!("creating kv store at {} & {}", meta_path, data_path);
+        let mut kvs = KVStore::new(
+            meta_path,
+            config.meta_size,
+            data_path,
+            config.node_size,
+            api_version,
+            pusher,
+        )
+        .map_err(phylactery::Error::KVStore)?;
+
+        // NOTE: we might want to consider not storing the version this way.
+        // As it prohibits the user from using this key.
+        let mut buf = vec![];
+        let store_version = kvs
+            .get(&Key::try_from("version").expect("store version"), &mut buf)
+            .expect("get version");
+
+        let store_version = match store_version {
+            Lookup::Absent => 0,
+            Lookup::Found(data) => {
+                let mut buf = Cursor::new(data.into_inner());
+                u128::decode(&mut buf).expect("decode version")
+            }
+        };
 
         Ok(Self {
             // meta
             root: config.path.clone(),
-            version,
+            api_version,
+            store_version,
 
             // patches
             pending: LinkedHashMap::new(),
@@ -103,17 +145,21 @@ impl Store<String> {
             transaction_log_tx,
 
             // data
-            kvs: KVStore::new(
-                meta_path,
-                config.meta_size,
-                data_path,
-                config.node_size,
-                version,
-                pusher,
-            )
-            .map_err(phylactery::Error::KVStore)?,
+            kvs,
             dequeues: BTreeMap::new(),
         })
+    }
+
+    pub(crate) fn version(&self) -> u128 {
+        self.store_version
+    }
+
+    fn update_version(&mut self, version: u128) {
+        let mut buf = vec![];
+        version.encode(&mut buf).expect("encode version");
+        self.kvs
+            .insert(Key::try_from("version").expect("store version"), &buf)
+            .expect("set version");
     }
 
     pub(crate) fn add_to_pending(&mut self, patch: ClientRequest) {
@@ -145,23 +191,19 @@ impl Store<String> {
         // TODO: make `push_encode`
         patch.encode(&mut tl_patch).expect("must be able to encode");
 
-        loop {
-            if let Err(err) = self.transaction_log_tx.push(&tl_patch) {
-                if let phylactery::ring_buffer::Error::EntryTooBig { .. } = err {
-                    let mut buf = vec![];
-                    self.transaction_log_rx
-                        .pop(&mut buf)
-                        .expect("must be able to pop");
-                } else {
-                    warn!("failed to push to transaction log: {}", err);
-                    return patch.nack(FAILED_TO_PUSH_TO_TRANSACTION_LOG);
-                }
+        while let Err(err) = self.transaction_log_tx.push(&tl_patch) {
+            if let phylactery::ring_buffer::Error::EntryTooBig { .. } = err {
+                let mut buf = vec![];
+                self.transaction_log_rx
+                    .pop(&mut buf)
+                    .expect("must be able to pop");
             } else {
-                break;
+                warn!("failed to push to transaction log: {}", err);
+                return patch.nack(FAILED_TO_PUSH_TO_TRANSACTION_LOG);
             }
         }
 
-        match patch {
+        let res = match patch {
             // dequeue
             ClientRequest::CreateQueue(queue) => {
                 let path = queue.path();
@@ -172,7 +214,7 @@ impl Store<String> {
                     match Dequeue::new(
                         format!("{}/{}", self.root, path),
                         queue.node_size(),
-                        self.version,
+                        self.api_version,
                     ) {
                         Ok(dequeue) => {
                             self.dequeues.insert(path.to_owned(), dequeue);
@@ -188,7 +230,7 @@ impl Store<String> {
 
             ClientRequest::DeleteQueue(queue) => {
                 let path = queue.path();
-                let ack = if let Some(_) = self.dequeues.remove(path) {
+                let ack = if self.dequeues.remove(path).is_some() {
                     remove_dir(format!("{}/{}", self.root, path)).expect("must be able to remove");
                     trace!("deleted queue {:?}", path);
                     queue.ack()
@@ -229,7 +271,7 @@ impl Store<String> {
             }
 
             // kv store
-            ClientRequest::Put(put) => match self.kvs.insert(put.key().clone(), put.value()) {
+            ClientRequest::Put(put) => match self.kvs.insert(*put.key(), put.value()) {
                 Ok(_) => Packet::PutAck(put.ack()),
                 Err(err) => {
                     println!("failed to insert into kv store: {}", err);
@@ -257,15 +299,19 @@ impl Store<String> {
 
             // other
             _ => panic!("invalid packet type {patch:?}"),
-        }
+        };
+
+        self.store_version += 1;
+        self.update_version(self.store_version);
+
+        res
     }
 
     pub(crate) fn deconstruct_iter(&self) -> impl Iterator<Item = Transfer> + '_ {
         self.kvs.deconstruct_iter().map(|path| {
-            let content = std::fs::read(&path).expect("must be able to read file");
+            let content = read(&path).expect("must be able to read file");
             let uuid = uuid::Uuid::new_v4().as_u128();
-            let header = Header::new(Kind::Transfer, self.version.into(), uuid);
-            Transfer::new(header, path, content)
+            Transfer::new((self.api_version.into(), uuid), path, content)
         })
     }
 
@@ -285,7 +331,7 @@ mod tests {
 
     use necronomicon::{
         kv_store_codec::{Delete, Get, Key, Put},
-        Header, Kind, Packet,
+        Packet,
     };
 
     use crate::{common::reqres::ClientRequest, config::StoreConfig};
@@ -308,14 +354,14 @@ mod tests {
         let mut store = Store::new(&config).expect("store");
 
         let put = Put::new(
-            generate_header(Kind::Put),
+            generate_header(),
             generate_key("key"),
             "kittens".as_bytes().to_vec(),
         );
 
-        let get = Get::new(generate_header(Kind::Get), generate_key("key"));
+        let get = Get::new(generate_header(), generate_key("key"));
 
-        let delete = Delete::new(generate_header(Kind::Delete), generate_key("key"));
+        let delete = Delete::new(generate_header(), generate_key("key"));
 
         let patches = [
             ClientRequest::Put(put.clone()),
@@ -345,9 +391,9 @@ mod tests {
         assert_eq!(results[2], Packet::DeleteAck(delete.ack()));
     }
 
-    fn generate_header(kind: Kind) -> Header {
+    fn generate_header() -> (u8, u128) {
         let id = ID_COUNTER.fetch_add(1, Ordering::Relaxed);
-        Header::new(kind, 1, id as u128)
+        (1, id as u128)
     }
 
     fn generate_key(key: &str) -> Key {

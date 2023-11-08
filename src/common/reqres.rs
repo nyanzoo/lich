@@ -64,6 +64,7 @@ pub enum ClientRequest {
     Delete(kv_store_codec::Delete),
 
     // transfer
+    #[cfg(feature = "backend")]
     Transfer(Transfer),
 }
 
@@ -84,6 +85,7 @@ impl Into<Packet> for ClientRequest {
             ClientRequest::Delete(packet) => Packet::Delete(packet),
 
             // transfer
+            #[cfg(feature = "backend")]
             ClientRequest::Transfer(packet) => Packet::Transfer(packet),
         }
     }
@@ -106,7 +108,50 @@ impl ClientRequest {
             ClientRequest::Delete(packet) => packet.header().uuid(),
 
             // transfer
+            #[cfg(feature = "backend")]
             ClientRequest::Transfer(packet) => packet.header().uuid(),
+        }
+    }
+
+    pub fn is_for_head(&self) -> bool {
+        match self {
+            // dequeue
+            ClientRequest::CreateQueue(_) => true,
+            ClientRequest::DeleteQueue(_) => true,
+            ClientRequest::Enqueue(_) => true,
+            ClientRequest::Dequeue(_) => true,
+            ClientRequest::Peek(_) => false,
+            ClientRequest::Len(_) => false,
+
+            // kv store
+            ClientRequest::Put(_) => true,
+            ClientRequest::Get(_) => false,
+            ClientRequest::Delete(_) => true,
+
+            // transfer
+            #[cfg(feature = "backend")]
+            ClientRequest::Transfer(_) => false,
+        }
+    }
+
+    pub fn is_for_tail(&self) -> bool {
+        match self {
+            // dequeue
+            ClientRequest::CreateQueue(_) => false,
+            ClientRequest::DeleteQueue(_) => false,
+            ClientRequest::Enqueue(_) => false,
+            ClientRequest::Dequeue(_) => false,
+            ClientRequest::Peek(_) => true,
+            ClientRequest::Len(_) => true,
+
+            // kv store
+            ClientRequest::Put(_) => false,
+            ClientRequest::Get(_) => true,
+            ClientRequest::Delete(_) => false,
+
+            // transfer
+            #[cfg(feature = "backend")]
+            ClientRequest::Transfer(_) => false,
         }
     }
 
@@ -130,6 +175,7 @@ impl ClientRequest {
             ClientRequest::Delete(packet) => Packet::DeleteAck(packet.nack(response_code)),
 
             // transfer
+            #[cfg(feature = "backend")]
             ClientRequest::Transfer(packet) => Packet::TransferAck(packet.nack(response_code)),
         }
     }
@@ -155,6 +201,7 @@ where
             ClientRequest::Delete(packet) => packet.encode(writer),
 
             // system
+            #[cfg(feature = "backend")]
             ClientRequest::Transfer(packet) => packet.encode(writer),
         }
     }
@@ -225,6 +272,7 @@ pub enum ClientResponse {
     Delete(kv_store_codec::DeleteAck),
 
     // transfer
+    #[cfg(feature = "backend")]
     Transfer(TransferAck),
 }
 
@@ -245,6 +293,7 @@ impl Ack for ClientResponse {
             ClientResponse::Delete(ack) => ack.header(),
 
             // system
+            #[cfg(feature = "backend")]
             ClientResponse::Transfer(ack) => ack.header(),
         }
     }
@@ -265,6 +314,7 @@ impl Ack for ClientResponse {
             ClientResponse::Delete(ack) => ack.response_code(),
 
             // system
+            #[cfg(feature = "backend")]
             ClientResponse::Transfer(ack) => ack.response_code(),
         }
     }
@@ -290,6 +340,7 @@ where
             ClientResponse::Delete(ack) => ack.encode(writer),
 
             // system
+            #[cfg(feature = "backend")]
             ClientResponse::Transfer(ack) => ack.encode(writer),
         }
     }

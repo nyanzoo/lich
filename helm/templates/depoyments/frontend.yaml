@@ -1,27 +1,25 @@
 apiVersion: apps/v1
-kind: StatefulSet
+kind: Deployment
 metadata:
-  name: operator
+  name: frontend
 spec:
   selector:
     matchLabels:
-      app: operator
-  serviceName: operator
-  replicas: 1
+      app: frontend
   template:
     metadata:
       labels:
-        app: operator
+        app: frontend
     spec:
       containers:
-        - name: operator
-          image: {{ .Values.operator.image}}
-          imagePullPolicy: {{ .Values.operator.imagePullPolicy}}
+        - name: frontend
+          image: {{ .Values.frontend.image }}
+          imagePullPolicy: {{ .Values.frontend.imagePullPolicy }}
           env:
             - name: RUST_LOG
-              value: {{ .Values.operator.logLevel }}
+              value: {{ .Values.frontend.logLevel }}
           volumeMounts:
-            - name: operator-config
+            - name: frontend-config
               mountPath: /etc/lich
               readOnly: true
           resources:
@@ -31,6 +29,6 @@ spec:
           ports:
               - containerPort: 6666
       volumes:
-        - name: operator-config
+        - name: frontend-config
           configMap:
-            name: operator-config
+            name: frontend-config

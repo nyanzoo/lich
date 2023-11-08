@@ -14,14 +14,17 @@ mod backend;
 #[cfg(feature = "frontend")]
 mod frontend;
 
+#[cfg(any(feature = "backend", feature = "frontend", feature = "operator"))]
+const CONFIG: &str = "/etc/lich/lich.toml";
+
 #[cfg(feature = "controller")]
 fn controller() {}
 
 #[cfg(feature = "operator")]
 fn operator() {
-    use std::net::{IpAddr, Ipv6Addr, SocketAddr};
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
-    use log::{error, info, trace};
+    use log::{debug, error, info, trace};
     use rayon::ThreadPoolBuilder;
 
     use necronomicon::full_decode;
@@ -35,13 +38,16 @@ fn operator() {
     pretty_env_logger::init();
 
     info!("starting lich(operator) version 0.0.1");
-    let contents = std::fs::read_to_string("./lich/tests/operator.toml").expect("read config");
+    let contents = std::fs::read_to_string(CONFIG).expect("read config");
     let config = toml::from_str::<OperatorConfig>(&contents).expect("valid config");
 
-    let listener = TcpListener::bind(SocketAddr::new(
-        IpAddr::V6(Ipv6Addr::LOCALHOST),
-        config.port,
-    ))
+    debug!("starting operator on port {}", config.port);
+    let listener = TcpListener::bind(
+        &[
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), config.port),
+            SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), config.port),
+        ][..],
+    )
     .expect("listener");
     let pool = ThreadPoolBuilder::new()
         .num_threads(4)
@@ -50,6 +56,7 @@ fn operator() {
 
     let cluster = Cluster::default();
 
+    trace!("listening");
     for stream in listener.incoming() {
         trace!("incoming");
         let cluster = cluster.clone();
@@ -117,14 +124,14 @@ fn backend() {
     use log::info;
 
     use crate::{
-        backend::{incoming::Incoming, state::State, store::Store},
+        backend::{incoming::Incoming, state::Init, store::Store},
         config::BackendConfig,
     };
 
     pretty_env_logger::init();
 
     info!("starting lich(backend) version 0.0.1");
-    let contents = std::fs::read_to_string("/etc/lich.toml").expect("read config");
+    let contents = std::fs::read_to_string(CONFIG).expect("read config");
     let config = toml::from_str::<BackendConfig>(&contents).expect("valid config");
 
     let store = Store::new(&config.store).expect("store");
@@ -137,7 +144,7 @@ fn backend() {
             Incoming::new(config.endpoints.port, requests_tx).run();
         });
 
-    let mut state = State::new(config.endpoints, store, requests_rx);
+    let mut state = Init::init(config.endpoints, store, requests_rx);
 
     loop {
         state = state.next();
@@ -146,7 +153,38 @@ fn backend() {
 
 #[cfg(feature = "frontend")]
 fn frontend() {
-    unimplemented!("frontend not implemented");
+    use std::thread;
+
+    use crossbeam::channel::bounded;
+    use log::info;
+
+    use crate::{
+        config::FrontendConfig,
+        frontend::{
+            incoming::Incoming,
+            state::{Init, State},
+        },
+    };
+
+    pretty_env_logger::init();
+
+    info!("starting lich(frontend) version 0.0.1");
+    let contents = std::fs::read_to_string(CONFIG).expect("read config");
+    let config = toml::from_str::<FrontendConfig>(&contents).expect("valid config");
+
+    let (requests_tx, requests_rx) = bounded(1024);
+
+    _ = thread::Builder::new()
+        .name("incoming".to_string())
+        .spawn(move || {
+            Incoming::new(config.endpoints.port, requests_tx).run();
+        });
+
+    let mut state: Box<dyn State> = Init::init(config.endpoints, requests_rx) as _;
+
+    loop {
+        state = state.next();
+    }
 }
 
 fn main() {

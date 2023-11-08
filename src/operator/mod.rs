@@ -127,18 +127,18 @@ impl ClusterInner {
                         existing_backend.role = role;
                     }
 
-                    self.backends.get_mut(pos + 1).map(|b| {
+                    if let Some(b) = self.backends.get_mut(pos + 1) {
                         b.role = ChainRole::Resigner;
-                    });
+                    }
                 }
             } else {
                 unimplemented!("backend rejoining with different addr?");
-                info!("backend {backend:?} rejoining as candidate");
-                backend.role = ChainRole::Candidate;
+                // info!("backend {backend:?} rejoining as candidate");
+                // backend.role = ChainRole::Candidate;
 
-                // put backend at end of chain!
-                self.backends.remove(pos);
-                self.backends.push(backend.clone());
+                // // put backend at end of chain!
+                // self.backends.remove(pos);
+                // self.backends.push(backend.clone());
             }
         } else {
             self.backends.iter_mut().for_each(|backend| {
@@ -329,6 +329,7 @@ impl Cluster {
     /// when store tranfer completes.
     /// We then send a report to *all* nodes in the cluster.
     pub(crate) fn add(&self, mut session: Session, join: Join) -> Result<(), Error> {
+        debug!("adding node: {join:?}");
         let mut cluster = self.0.lock();
         match join.clone().role() {
             Role::Backend(_) => cluster.add_backend(&mut session, join),

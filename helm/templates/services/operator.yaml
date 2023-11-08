@@ -1,10 +1,14 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: lich-operator-service
+  name: operator
 spec:
+  clusterIP: None
   selector:
-    app: lich-operator
+    app: operator
   ports:
-    - port: 6666
+    - name: operator
+      protocol: TCP
+      port: 6666
       targetPort: 6666
+  internalTrafficPolicy: Cluster

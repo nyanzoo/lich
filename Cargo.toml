@@ -3,8 +3,8 @@ edition = "2021"
 name = "lich"
 version = "0.1.0"
 
-[profile.test]
-test-threads = 1
+[toolchain]
+channel = "nightly"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -35,7 +35,7 @@ matches = "0.1"
 tempfile = "3.8"
 
 [features]
-default = ["operator"]
+default = []
 # clients
 client = []
 # servers

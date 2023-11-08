@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: backend
+spec:
+  selector:
+    matchLabels:
+      app: backend
+  serviceName: backend
+  replicas: {{ .Values.backend.replicas }}
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      containers:
+        - name: backend
+          image: {{ .Values.backend.image }}
+          imagePullPolicy: {{ .Values.backend.imagePullPolicy }}
+          env:
+            - name: RUST_LOG
+              value: {{ .Values.backend.logLevel }}
+          volumeMounts:
+            - name: backend-config
+              mountPath: /etc/lich
+              readOnly: true
+            - name: backend
+              mountPath: /opt/lich
+              readOnly: false
+          resources:
+            limits:
+              memory: "128Mi"
+              cpu: "500m"
+          ports:
+              - containerPort: 6666
+      volumes:
+        - name: backend-config
+          configMap:
+            name: backend-config
+        - name: backend
+          persistentVolumeClaim:
+            claimName: backend-pvc

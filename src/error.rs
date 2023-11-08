@@ -9,6 +9,7 @@ pub enum Error {
     #[error("phylactery error {0}")]
     Phylactery(#[from] phylactery::Error),
 
+    #[cfg(any(feature = "backend", feature = "frontend"))]
     #[error("connection error")]
     Connection,
 }

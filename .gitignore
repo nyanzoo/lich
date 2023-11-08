@@ -12,7 +12,7 @@
 # .vscode files
 .vscode
 
-# tarpaulin coverage files
+# lcov coverage files
 *.profraw
 lcov.info
 

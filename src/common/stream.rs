@@ -5,6 +5,7 @@ pub mod mock {
         cmp,
         collections::HashMap,
         io::{Read, Write},
+        net::ToSocketAddrs,
         rc::Rc,
         sync::Arc,
         time::Duration,
@@ -167,15 +168,15 @@ pub mod mock {
     }
 
     impl TcpStream {
-        pub fn connect<S>(addr: S) -> std::io::Result<Self>
+        pub fn connect<A>(addr: A) -> std::io::Result<Self>
         where
-            S: ToString,
+            A: ToSocketAddrs,
         {
-            let addr = addr.to_string();
+            let addr = addr.to_socket_addrs()?.next().expect("next").to_string();
             if let Some(stream) = CONNECTIONS.get(addr.clone()) {
                 match stream {
                     Connection::Accept(stream) => return Ok(stream.clone()),
-                    Connection::Reject(err) => return Err(std::io::Error::from(err.clone())),
+                    Connection::Reject(err) => return Err(std::io::Error::from(err)),
                 }
             }
 
@@ -185,6 +186,25 @@ pub mod mock {
 
             CONNECTIONS.insert(addr, Connection::Accept(stream.clone()));
             Ok(stream)
+        }
+
+        pub fn retryable_connect<A, P>(addr: A, mut policy: P) -> std::io::Result<Self>
+        where
+            A: ToSocketAddrs + Clone + std::fmt::Debug,
+            P: super::RetryPolicy,
+        {
+            loop {
+                match Self::connect(addr.clone()) {
+                    Ok(stream) => return Ok(stream),
+                    Err(err) => {
+                        if policy.retry() {
+                            log::warn!("retrying connection to {:?}: {err:?}", addr);
+                        } else {
+                            return Err(err);
+                        }
+                    }
+                }
+            }
         }
 
         pub fn peer_addr(&self) -> String {
@@ -252,7 +272,7 @@ pub mod mock {
     pub struct TcpListener(Rc<RefCell<Vec<TcpStream>>>);
 
     impl TcpListener {
-        pub fn bind(_: impl ToString) -> std::io::Result<Self> {
+        pub fn bind(_: impl ToSocketAddrs) -> std::io::Result<Self> {
             Ok(Self(Rc::default()))
         }
 
@@ -300,12 +320,31 @@ pub mod real {
     }
 
     impl TcpStream {
-        pub fn connect<S>(addr: S) -> std::io::Result<Self>
+        pub fn connect<A>(addr: A) -> std::io::Result<Self>
         where
-            S: ToString,
+            A: ToSocketAddrs + std::fmt::Debug,
         {
-            let inner = std::net::TcpStream::connect(addr.to_string())?;
+            let inner = std::net::TcpStream::connect(addr)?;
             Ok(Self { inner })
+        }
+
+        pub fn retryable_connect<A, P>(addr: A, mut policy: P) -> std::io::Result<Self>
+        where
+            A: ToSocketAddrs + Clone + std::fmt::Debug,
+            P: super::RetryPolicy,
+        {
+            loop {
+                match Self::connect(addr.clone()) {
+                    Ok(stream) => return Ok(stream),
+                    Err(err) => {
+                        if policy.retry() {
+                            log::warn!("retrying connection to {:?}: {err:?}", addr);
+                        } else {
+                            return Err(err);
+                        }
+                    }
+                }
+            }
         }
 
         pub fn peer_addr(&self) -> String {
@@ -370,6 +409,65 @@ pub mod real {
                 .next()
                 .map(|inner| inner.map(|inner| TcpStream { inner }))
         }
+    }
+}
+
+pub trait RetryPolicy {
+    fn retry(&mut self) -> bool;
+}
+
+pub struct RetryConsistent {
+    count: Option<usize>,
+    duration: std::time::Duration,
+}
+
+impl RetryConsistent {
+    pub fn new(duration: std::time::Duration, count: Option<usize>) -> Self {
+        Self { count, duration }
+    }
+}
+
+impl RetryPolicy for RetryConsistent {
+    fn retry(&mut self) -> bool {
+        std::thread::sleep(self.duration);
+        if let Some(count) = self.count.as_mut() {
+            if *count == 0 {
+                return false;
+            }
+            *count -= 1;
+        }
+        return true;
+    }
+}
+
+pub struct RetryExponential {
+    count: Option<usize>,
+    duration: std::time::Duration,
+    multiplier: f64,
+}
+
+impl RetryExponential {
+    pub fn new(duration: std::time::Duration, multiplier: f64, count: Option<usize>) -> Self {
+        Self {
+            count,
+            duration,
+            multiplier,
+        }
+    }
+}
+
+impl RetryPolicy for RetryExponential {
+    fn retry(&mut self) -> bool {
+        std::thread::sleep(self.duration);
+        if let Some(count) = self.count.as_mut() {
+            if *count == 0 {
+                return false;
+            }
+            *count -= 1;
+        }
+        self.duration =
+            std::time::Duration::from_secs_f64(self.duration.as_secs_f64() * self.multiplier);
+        return true;
     }
 }
 

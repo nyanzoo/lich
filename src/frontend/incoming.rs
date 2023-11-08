@@ -139,26 +139,3 @@ fn handle_requests(
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::Incoming;
-
-    use crate::common::stream::{preload_accepts, TcpStream};
-
-    #[test]
-    fn handle_incoming() {}
-
-    #[test]
-    fn test_incoming() {
-        // Create the connections we want to use.
-        // let client = TcpStream::connect("client").expect("bind");
-        // client.fill_write(&[]);
-
-        // preload_accepts(&[client]);
-
-        // let (requests_tx, requests_rx) = crossbeam::channel::unbounded();
-        // let incoming = Incoming::new(0, requests_tx);
-        // incoming.run();
-    }
-}

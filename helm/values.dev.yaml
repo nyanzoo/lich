@@ -6,7 +6,7 @@ backend:
     port=6666
 
     [store]
-    path = '/etc/lich/store'
+    path = '/opt/lich/store'
     meta_size = 1024
     node_size = 1048576
     version = 1
