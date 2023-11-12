@@ -44,8 +44,8 @@ fn operator() {
     debug!("starting operator on port {}", config.port);
     let listener = TcpListener::bind(
         &[
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), config.port),
-            SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), config.port),
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), config.port),
+            SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), config.port),
         ][..],
     )
     .expect("listener");

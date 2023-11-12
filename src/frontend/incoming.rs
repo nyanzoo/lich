@@ -27,7 +27,7 @@ pub struct Incoming {
 impl Incoming {
     pub fn new(port: u16, requests_tx: Sender<ProcessRequest>) -> Self {
         info!("starting listening for incoming requests on port {}", port);
-        let listener = TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port))
+        let listener = TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port))
             .expect("listener");
         let pool = ThreadPoolBuilder::new()
             .num_threads(4)
