@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    io::Write,
+    io::{Write, BufReader},
     net::{Shutdown, ToSocketAddrs},
     thread::JoinHandle,
     time::Duration,
@@ -22,9 +22,8 @@ use crate::{
         stream::{RetryConsistent, TcpStream},
     },
     config::EndpointConfig,
+    outgoing::Outgoing,
 };
-
-use super::outgoing::Outgoing;
 
 const CHANNEL_CAPACITY: usize = 1024;
 
@@ -106,16 +105,16 @@ impl State for WaitingForOperator {
         let (head, head_ack_rx) = if let Some(outgoing_addr) = head_addr {
             let (ack_tx, ack_rx) = bounded(CHANNEL_CAPACITY);
             trace!("creating outgoing to {}", outgoing_addr);
-            let Ok(outgoing) = Outgoing::new(outgoing_addr.clone(), head_outgoing_rx, ack_tx)
-            else {
-                warn!("failed to create outgoing to {}", outgoing_addr);
-                return Box::new(WaitingForOperator {
-                    operator,
-                    requests_rx,
-                });
-            };
-
-            (Some(outgoing), Some(ack_rx))
+            match Outgoing::new(outgoing_addr.clone(), head_outgoing_rx, ack_tx) {
+                Ok(outgoing) => (Some(outgoing), Some(ack_rx)),
+                Err(err) => {
+                    warn!("failed to create outgoing to {}: {}", outgoing_addr, err);
+                    return Box::new(WaitingForOperator {
+                        operator,
+                        requests_rx,
+                    });
+                }
+            }
         } else {
             (None, None)
         };
@@ -123,16 +122,17 @@ impl State for WaitingForOperator {
         let (tail, tail_ack_rx) = if let Some(outgoing_addr) = tail_addr {
             let (ack_tx, ack_rx) = bounded(CHANNEL_CAPACITY);
             trace!("creating outgoing to {}", outgoing_addr);
-            let Ok(outgoing) = Outgoing::new(outgoing_addr.clone(), tail_outgoing_rx, ack_tx)
-            else {
-                warn!("failed to create outgoing to {}", outgoing_addr);
-                return Box::new(WaitingForOperator {
-                    operator,
-                    requests_rx,
-                });
-            };
 
-            (Some(outgoing), Some(ack_rx))
+            match Outgoing::new(outgoing_addr.clone(), tail_outgoing_rx, ack_tx) {
+                Ok(outgoing) => (Some(outgoing), Some(ack_rx)),
+                Err(err) => {
+                    warn!("failed to create outgoing to {}: {}", outgoing_addr, err);
+                    return Box::new(WaitingForOperator {
+                        operator,
+                        requests_rx,
+                    });
+                }
+            }
         } else {
             (None, None)
         };
@@ -410,16 +410,17 @@ impl State for Update {
             let (head, head_ack_rx) = if let Some(outgoing_addr) = head_addr {
                 let (ack_tx, ack_rx) = bounded(CHANNEL_CAPACITY);
                 trace!("creating outgoing to {}", outgoing_addr);
-                let Ok(outgoing) = Outgoing::new(outgoing_addr.clone(), head_outgoing_rx, ack_tx)
-                else {
-                    warn!("failed to create outgoing to {}", outgoing_addr);
-                    return Box::new(WaitingForOperator {
-                        operator,
-                        requests_rx,
-                    });
-                };
 
-                (Some(outgoing), Some(ack_rx))
+                match Outgoing::new(outgoing_addr.clone(), head_outgoing_rx, ack_tx) {
+                    Ok(outgoing) => (Some(outgoing), Some(ack_rx)),
+                    Err(err) => {
+                        warn!("failed to create outgoing to {}: {}", outgoing_addr, err);
+                        return Box::new(WaitingForOperator {
+                            operator,
+                            requests_rx,
+                        });
+                    }
+                }
             } else {
                 (None, None)
             };
@@ -427,16 +428,17 @@ impl State for Update {
             let (tail, tail_ack_rx) = if let Some(outgoing_addr) = tail_addr {
                 let (ack_tx, ack_rx) = bounded(CHANNEL_CAPACITY);
                 trace!("creating outgoing to {}", outgoing_addr);
-                let Ok(outgoing) = Outgoing::new(outgoing_addr.clone(), tail_outgoing_rx, ack_tx)
-                else {
-                    warn!("failed to create outgoing to {}", outgoing_addr);
-                    return Box::new(WaitingForOperator {
-                        operator,
-                        requests_rx,
-                    });
-                };
 
-                (Some(outgoing), Some(ack_rx))
+                match Outgoing::new(outgoing_addr.clone(), tail_outgoing_rx, ack_tx) {
+                    Ok(outgoing) => (Some(outgoing), Some(ack_rx)),
+                    Err(err) => {
+                        warn!("failed to create outgoing to {}: {}", outgoing_addr, err);
+                        return Box::new(WaitingForOperator {
+                            operator,
+                            requests_rx,
+                        });
+                    }
+                }
             } else {
                 (None, None)
             };
@@ -487,7 +489,7 @@ impl OperatorConnection {
         )
         .expect("connect");
         trace!("connected to operator {:?}", operator);
-        let mut operator_read = operator.clone();
+        let mut operator_read = BufReader::new(operator.clone());
         let mut operator_write = operator.clone();
 
         let read = std::thread::spawn(move || {
@@ -552,7 +554,7 @@ impl OperatorConnection {
             // We can use a uuid for this.
             let join = Join::new(
                 (1, Uuid::new_v4().as_u128()),
-                Role::Frontend(format!("{}:{}", "localhost", our_port)),
+                Role::Frontend(format!("{}:{}", fqdn, our_port)),
                 0,
                 false,
             );

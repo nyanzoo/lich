@@ -14,6 +14,9 @@ mod backend;
 #[cfg(feature = "frontend")]
 mod frontend;
 
+#[cfg(any(feature = "backend", feature = "frontend"))]
+mod outgoing;
+
 #[cfg(any(feature = "backend", feature = "frontend", feature = "operator"))]
 const CONFIG: &str = "/etc/lich/lich.toml";
 
@@ -35,7 +38,7 @@ fn operator() {
         operator::Cluster,
     };
 
-    pretty_env_logger::init();
+    env_logger::init();
 
     info!("starting lich(operator) version 0.0.1");
     let contents = std::fs::read_to_string(CONFIG).expect("read config");
@@ -64,7 +67,7 @@ fn operator() {
             Ok(stream) => {
                 let session = Session::new(stream, 5);
                 info!("new session {:?}", session);
-                let mut read_session = session.clone();
+                let (mut read_session, session_writer) = session.split();
                 loop {
                     match full_decode(&mut read_session) {
                         Ok(packet) => {
@@ -73,7 +76,7 @@ fn operator() {
                             match request {
                                 System::Join(join) => {
                                     info!("join: {:?}", join);
-                                    if let Err(err) = cluster.add(session.clone(), join) {
+                                    if let Err(err) = cluster.add(session_writer.clone(), join) {
                                         error!("cluster.add: {}", err);
                                         continue;
                                     }
@@ -128,7 +131,7 @@ fn backend() {
         config::BackendConfig,
     };
 
-    pretty_env_logger::init();
+    env_logger::init();
 
     info!("starting lich(backend) version 0.0.1");
     let contents = std::fs::read_to_string(CONFIG).expect("read config");
@@ -166,7 +169,7 @@ fn frontend() {
         },
     };
 
-    pretty_env_logger::init();
+    env_logger::init();
 
     info!("starting lich(frontend) version 0.0.1");
     let contents = std::fs::read_to_string(CONFIG).expect("read config");

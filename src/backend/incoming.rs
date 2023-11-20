@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     io::Write,
     net::{IpAddr, Ipv4Addr, SocketAddr},
 };
@@ -11,7 +12,7 @@ use rayon::{ThreadPool, ThreadPoolBuilder};
 
 use crate::common::{
     reqres::{ClientRequest, ClientResponse, ProcessRequest},
-    session::Session,
+    session::{Session, SessionReader, SessionWriter},
     stream::TcpListener,
 };
 
@@ -49,22 +50,29 @@ impl Incoming {
             pool,
         } = self;
 
+        let mut session_map = BTreeMap::new();
+        // If same stream  reconnects we need to kill the old threads.
         for stream in listener.incoming() {
             match stream {
                 Ok(stream) => {
-                    let requests_tx = requests_tx.clone();
                     let session = Session::new(stream, 5);
+                    if let Some(old_session) = session_map.insert(session.peer_addr(), session.clone()) {
+                        _ = old_session.shutdown();
+                    }
+
+                    let requests_tx = requests_tx.clone();
                     let (ack_tx, ack_rx) = bounded(0);
                     info!("new session {:?}", session);
-                    let (read, write) = (session.clone(), session.clone());
+                    let (read, write) = session.split();
+                    let ack_writer = write.clone();
                     // I think the acks need to be oneshots that are per
                     pool.spawn(|| {
                         debug!("spawned thread for requests on session {:?}", read);
-                        handle_requests(read, requests_tx, ack_tx);
+                        handle_requests(read, write, requests_tx, ack_tx);
                     });
                     pool.spawn(|| {
-                        debug!("spawned thread for acks for session {:?}", write);
-                        handle_acks(write, ack_rx);
+                        debug!("spawned thread for acks for session {:?}", ack_writer);
+                        handle_acks(ack_writer, ack_rx);
                     });
                 }
                 Err(err) => error!("listener.accept: {}", err),
@@ -73,7 +81,7 @@ impl Incoming {
     }
 }
 
-fn handle_acks(mut session: Session, ack_rx: Receiver<ClientResponse>) {
+fn handle_acks(mut session: SessionWriter, ack_rx: Receiver<ClientResponse>) {
     loop {
         if let Ok(ack) = ack_rx.recv() {
             trace!("got ack {:?}", ack);
@@ -103,14 +111,15 @@ fn handle_acks(mut session: Session, ack_rx: Receiver<ClientResponse>) {
 }
 
 fn handle_requests(
-    mut session: Session,
+    mut reader: SessionReader,
+    mut writer: SessionWriter,
     requests_tx: Sender<ProcessRequest>,
     ack_tx: Sender<ClientResponse>,
 ) {
     loop {
-        match full_decode(&mut session) {
+        match full_decode(&mut reader) {
             Ok(packet) => {
-                session.update_last_seen();
+                reader.update_last_seen();
                 trace!("got {:?} packet", packet);
                 let request = ClientRequest::from(packet.clone());
                 let request = ProcessRequest::new(request, ack_tx.clone());
@@ -125,16 +134,16 @@ fn handle_requests(
                     Err(err) => {
                         warn!("requests_tx.send: {}", err);
                         if let Some(nack) = packet.nack(necronomicon::SERVER_BUSY) {
-                            nack.encode(&mut session).expect("encode");
-                            session.flush().expect("flush");
+                            nack.encode(&mut writer).expect("encode");
+                            writer.flush().expect("flush");
                         }
                         break;
                     }
                 }
             }
             Err(err) => {
-                warn!("warn: {}", err);
-                session.flush().expect("flush");
+                // warn!("warn: {}", err);
+                writer.flush().expect("flush");
             }
         }
     }

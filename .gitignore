@@ -21,3 +21,6 @@ lcov.info
 
 # helm output
 **/*.tgz
+
+# log files
+**/*.log

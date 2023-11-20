@@ -8,7 +8,7 @@ use necronomicon::{
 
 use parking_lot::Mutex;
 
-use crate::{common::session::Session, error::Error, operator::chain::ConnectionState};
+use crate::{common::session::SessionWriter, error::Error, operator::chain::ConnectionState};
 
 use self::chain::{Backend, ChainRole, Frontend};
 
@@ -25,7 +25,7 @@ pub(crate) struct Cluster(Arc<Mutex<ClusterInner>>);
 struct ClusterInner {
     backends: Vec<Backend>,
     frontend: Option<Frontend>,
-    observers: Vec<Session>,
+    observers: Vec<SessionWriter>,
 }
 
 impl ClusterInner {
@@ -60,10 +60,10 @@ impl ClusterInner {
         }
     }
 
-    fn add_backend(&mut self, session: &mut Session, join: Join) -> Result<(), Error> {
+    fn add_backend(&mut self, mut session: SessionWriter, join: Join) -> Result<(), Error> {
         let id = join.header().uuid();
 
-        join.clone().ack().encode(session)?;
+        join.clone().ack().encode(&mut session)?;
         let addr = join.addr().expect("addr").to_owned();
 
         // We need to check the following:
@@ -147,7 +147,7 @@ impl ClusterInner {
             self.backends.push(Backend {
                 addr,
                 role: ChainRole::Tail,
-                session: session.clone(),
+                session,
                 successor_connection: join.successor_lost().into(),
             });
             if let Some(head) = self.backends.first_mut() {
@@ -191,7 +191,7 @@ impl ClusterInner {
         Ok(())
     }
 
-    fn add_frontend(&mut self, session: &mut Session, join: Join) -> Result<(), Error> {
+    fn add_frontend(&mut self, mut session: SessionWriter, join: Join) -> Result<(), Error> {
         let id = join.header().uuid();
         let addr = join.addr().expect("addr").to_owned();
         if let Some(head) = self.head() {
@@ -203,9 +203,9 @@ impl ClusterInner {
                         tail: Some(tail.addr.clone()),
                     },
                 );
-                join.ack().encode(session)?;
+                join.ack().encode(&mut session)?;
                 debug!("sending report to frontend: {:?}", report);
-                report.encode(session)?;
+                report.encode(&mut session)?;
             } else {
                 let report = Report::new(
                     (1, id),
@@ -214,26 +214,22 @@ impl ClusterInner {
                         tail: None,
                     },
                 );
-                join.ack().encode(session)?;
+                join.ack().encode(&mut session)?;
                 debug!("sending report to frontend: {:?}", report);
-                report.encode(session)?;
+                report.encode(&mut session)?;
             }
         } else {
-            join.nack(CHAIN_NOT_READY).encode(session)?;
-            return Ok(());
+            join.nack(CHAIN_NOT_READY).encode(&mut session)?;
         }
         session.flush()?;
-        self.frontend = Some(Frontend {
-            addr,
-            session: session.clone(),
-        });
+        self.frontend = Some(Frontend { addr, session });
 
         self.send_observer_reports(id)?;
 
         Ok(())
     }
 
-    fn add_observer(&mut self, session: Session) {
+    fn add_observer(&mut self, session: SessionWriter) {
         self.observers.push(session);
     }
 
@@ -328,12 +324,12 @@ impl Cluster {
     /// Happens when a node first comes online and joins the cluster or
     /// when store tranfer completes.
     /// We then send a report to *all* nodes in the cluster.
-    pub(crate) fn add(&self, mut session: Session, join: Join) -> Result<(), Error> {
+    pub(crate) fn add(&self, session: SessionWriter, join: Join) -> Result<(), Error> {
         debug!("adding node: {join:?}");
         let mut cluster = self.0.lock();
         match join.clone().role() {
-            Role::Backend(_) => cluster.add_backend(&mut session, join),
-            Role::Frontend(_) => cluster.add_frontend(&mut session, join),
+            Role::Backend(_) => cluster.add_backend(session, join),
+            Role::Frontend(_) => cluster.add_frontend(session, join),
             Role::Observer => {
                 cluster.add_observer(session);
                 cluster.send_observer_reports(join.header().uuid())
@@ -358,7 +354,7 @@ mod tests {
         let cluster = Cluster::new();
 
         let head_stream = TcpStream::connect("head").unwrap();
-        let head = Session::new(head_stream.clone(), 100);
+        let (_, head) = Session::new(head_stream.clone(), 100).split();
 
         let join = Join::new((1, 1), Role::Backend("head".to_owned()), 1, false);
 
@@ -370,7 +366,7 @@ mod tests {
         ]);
 
         let middle_stream = TcpStream::connect("middle").unwrap();
-        let middle = Session::new(middle_stream.clone(), 100);
+        let (_, middle) = Session::new(middle_stream.clone(), 100).split();
 
         let join = Join::new((1, 2), Role::Backend("middle".to_owned()), 1, false);
 
@@ -389,7 +385,7 @@ mod tests {
         ))]);
 
         let tail_stream = TcpStream::connect("tail").unwrap();
-        let tail = Session::new(tail_stream.clone(), 100);
+        let (_, tail) = Session::new(tail_stream.clone(), 100).split();
 
         let join = Join::new((1, 3), Role::Backend("tail".to_owned()), 1, false);
 
@@ -423,7 +419,7 @@ mod tests {
         let cluster = Cluster::new();
 
         let frontend_stream = TcpStream::connect("frontend").unwrap();
-        let frontend = Session::new(frontend_stream.clone(), 100);
+        let (_, frontend) = Session::new(frontend_stream.clone(), 100).split();
 
         let join = Join::new((1, 1), Role::Frontend("frontend".to_owned()), 1, false);
 
@@ -432,7 +428,7 @@ mod tests {
         frontend_stream.verify_writes(&[Packet::JoinAck(JoinAck::new((1, 1), CHAIN_NOT_READY))]);
 
         let head_tail_stream = TcpStream::connect("head_tail").unwrap();
-        let head_tail = Session::new(head_tail_stream.clone(), 100);
+        let (_, head_tail) = Session::new(head_tail_stream.clone(), 100).split();
 
         let join = Join::new((1, 2), Role::Backend("head_tail".to_owned()), 1, false);
 
@@ -464,7 +460,7 @@ mod tests {
         let cluster = Cluster::new();
 
         let head_stream = TcpStream::connect("head").unwrap();
-        let head = Session::new(head_stream.clone(), 100);
+        let (_, head) = Session::new(head_stream.clone(), 100).split();
 
         let join = Join::new((1, 1), Role::Backend("head".to_owned()), 1, false);
 
@@ -478,7 +474,7 @@ mod tests {
         // Create a tail stream and drop it.
         {
             let tail_stream = TcpStream::connect("tail").unwrap();
-            let tail = Session::new(tail_stream.clone(), 100);
+            let (_, tail) = Session::new(tail_stream.clone(), 100).split();
 
             let join = Join::new((1, 2), Role::Backend("tail".to_owned()), 1, false);
 
@@ -513,7 +509,7 @@ mod tests {
         // Rejoin the tail and check that it is now a candidate. Head should become Tail.
 
         let tail_stream = TcpStream::connect("tail").unwrap();
-        let tail = Session::new(tail_stream.clone(), 100);
+        let (_, tail) = Session::new(tail_stream.clone(), 100).split();
 
         let join = Join::new((1, 4), Role::Backend("tail".to_owned()), 1, false);
 

@@ -1,4 +1,4 @@
-use crate::common::session::Session;
+use crate::common::session::SessionWriter;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ChainRole {
@@ -30,12 +30,12 @@ impl From<bool> for ConnectionState {
 pub struct Backend {
     pub addr: String,
     pub role: ChainRole,
-    pub session: Session,
+    pub session: SessionWriter,
     pub successor_connection: ConnectionState,
 }
 
 #[derive(Clone, Debug)]
 pub struct Frontend {
     pub addr: String,
-    pub session: Session,
+    pub session: SessionWriter,
 }

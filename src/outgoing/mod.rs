@@ -1,11 +1,12 @@
 use std::{
     fmt::{Debug, Formatter},
+    io::BufReader,
     io::Write,
     net::ToSocketAddrs,
 };
 
 use crossbeam::channel::{Receiver, Sender};
-use log::info;
+use log::{info, trace};
 
 use necronomicon::{full_decode, Encode, Packet};
 
@@ -53,7 +54,7 @@ impl Outgoing {
             .expect("no addr found")
             .to_string();
 
-        let mut retry = 5;
+        let mut retry = 50;
         let stream = loop {
             match TcpStream::connect(addr.clone()) {
                 Ok(stream) => {
@@ -70,21 +71,29 @@ impl Outgoing {
             }
         };
         info!("starting outgoing to {addr}");
-        let (mut read, mut write) = (stream.clone(), stream.clone());
+        let (mut read, mut write) = (BufReader::new(stream.clone()), stream.clone());
 
-        let read_handle = std::thread::spawn(move || loop {
-            let packet = requests_rx.recv().expect("must be able to receive packet");
+        let read_handle = std::thread::spawn({
+            let addr = addr.clone();
+            move || loop {
+                let packet = requests_rx.recv().expect("must be able to receive packet");
 
-            packet.encode(&mut write).expect("failed to write packet");
+                trace!("sending packet {:?} to {addr}", packet);
+                packet.encode(&mut write).expect("failed to write packet");
 
-            write.flush().expect("failed to flush write");
+                write.flush().expect("failed to flush write");
+            }
         });
 
-        let write_handle = std::thread::spawn(move || loop {
-            let packet = full_decode(&mut read).expect("failed to decode packet");
+        let write_handle = std::thread::spawn({
+            let addr = addr.clone();
+            move || loop {
+                let packet = full_decode(&mut read).expect("failed to decode packet");
 
-            let response = ClientResponse::from(packet);
-            ack_tx.send(response).expect("failed to send ack");
+                trace!("received packet {:?} on {addr}", packet);
+                let response = ClientResponse::from(packet);
+                ack_tx.send(response).expect("failed to send ack");
+            }
         });
 
         Ok(Self {

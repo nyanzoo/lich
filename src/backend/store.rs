@@ -274,7 +274,6 @@ impl Store<String> {
             ClientRequest::Put(put) => match self.kvs.insert(*put.key(), put.value()) {
                 Ok(_) => Packet::PutAck(put.ack()),
                 Err(err) => {
-                    println!("failed to insert into kv store: {}", err);
                     warn!("failed to insert into kv store: {}", err);
                     Packet::PutAck(put.nack(INTERNAL_ERROR))
                 }
@@ -324,7 +323,7 @@ impl Store<String> {
 mod tests {
     use std::{
         cmp::min,
-        sync::atomic::{AtomicU64, Ordering},
+        sync::atomic::{AtomicU64, Ordering}, path::Path,
     };
 
     use tempfile::tempdir;
@@ -346,7 +345,7 @@ mod tests {
         let path = dir.path().to_str().unwrap().to_string();
 
         let config = StoreConfig {
-            path,
+            path: path.clone(),
             meta_size: 1024,
             node_size: 1024,
             version: 1,
@@ -389,6 +388,8 @@ mod tests {
             Packet::GetAck(get.ack("kittens".as_bytes().to_vec()))
         );
         assert_eq!(results[2], Packet::DeleteAck(delete.ack()));
+
+        hexyl(&Path::new(&format!("{}/meta.bin", path)));
     }
 
     fn generate_header() -> (u8, u128) {
@@ -401,5 +402,19 @@ mod tests {
         let len = min(key.len(), slice.len());
         slice[..len].copy_from_slice(&key.as_bytes()[..len]);
         Key::new(slice)
+    }
+
+    #[allow(dead_code)]
+    fn hexyl(path: &std::path::Path) {
+        use std::io::Write;
+        std::io::stdout()
+            .write_all(
+                &std::process::Command::new("hexyl")
+                    .arg(path)
+                    .output()
+                    .unwrap()
+                    .stdout,
+            )
+            .unwrap();
     }
 }

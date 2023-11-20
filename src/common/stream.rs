@@ -207,6 +207,10 @@ pub mod mock {
             }
         }
 
+        pub fn addr(&self) -> String {
+            self.inner.lock().addr.clone()
+        }
+
         pub fn peer_addr(&self) -> String {
             unimplemented!("peer_addr")
         }
@@ -345,6 +349,10 @@ pub mod real {
                     }
                 }
             }
+        }
+
+        pub fn addr(&self) -> String {
+            self.inner.local_addr().expect("local_addr").to_string()
         }
 
         pub fn peer_addr(&self) -> String {

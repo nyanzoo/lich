@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    io::Write,
+    io::{Write, BufReader},
     net::{Shutdown, ToSocketAddrs},
     thread::JoinHandle,
     time::Duration,
@@ -22,9 +22,10 @@ use crate::{
         stream::{RetryConsistent, TcpStream},
     },
     config::EndpointConfig,
+    outgoing::Outgoing,
 };
 
-use super::{outgoing::Outgoing, store::Store};
+use super::store::Store;
 
 const CHANNEL_CAPACITY: usize = 1024;
 
@@ -122,16 +123,17 @@ impl State for WaitingForOperator {
         let (outgoing, ack_rx) = if let Some(outgoing_addr) = outgoing_addr {
             let (ack_tx, ack_rx) = bounded(CHANNEL_CAPACITY);
             trace!("creating outgoing to {}", outgoing_addr);
-            let Ok(outgoint) = Outgoing::new(outgoing_addr.clone(), outgoing_rx, ack_tx) else {
-                warn!("failed to create outgoing to {}", outgoing_addr);
-                return Box::new(WaitingForOperator {
-                    store,
-                    operator,
-                    requests_rx,
-                });
-            };
-
-            (Some(outgoint), Some(ack_rx))
+            match Outgoing::new(outgoing_addr.clone(), outgoing_rx, ack_tx) {
+                Ok(outgoing) => (Some(outgoing), Some(ack_rx)),
+                Err(err) => {
+                    warn!("failed to create outgoing to {}: {}", outgoing_addr, err);
+                    return Box::new(WaitingForOperator {
+                        store,
+                        operator,
+                        requests_rx,
+                    });
+                }
+            }
         } else {
             (None, None)
         };
@@ -404,15 +406,16 @@ impl State for Update {
                 let (ack_tx, ack_rx) = bounded(CHANNEL_CAPACITY);
                 trace!("creating outgoing to {}", outgoing_addr);
 
-                if let Ok(outgoing) = Outgoing::new(outgoing_addr.clone(), outgoing_rx, ack_tx) {
-                    (Some(outgoing), Some(ack_rx))
-                } else {
-                    warn!("failed to create outgoing to {}", outgoing_addr);
-                    return Box::new(WaitingForOperator {
-                        store,
-                        operator,
-                        requests_rx,
-                    });
+                match Outgoing::new(outgoing_addr.clone(), outgoing_rx, ack_tx) {
+                    Ok(outgoing) => (Some(outgoing), Some(ack_rx)),
+                    Err(err) => {
+                        warn!("failed to create outgoing to {}: {}", outgoing_addr, err);
+                        return Box::new(WaitingForOperator {
+                            store,
+                            operator,
+                            requests_rx,
+                        });
+                    }
                 }
             } else {
                 (None, None)
@@ -537,7 +540,7 @@ impl OperatorConnection {
         )
         .expect("connect");
         trace!("connected to operator {:?}", operator);
-        let mut operator_read = operator.clone();
+        let mut operator_read = BufReader::new(operator.clone());
         let mut operator_write = operator.clone();
 
         let read = std::thread::spawn(move || {
@@ -602,7 +605,7 @@ impl OperatorConnection {
             // We can use a uuid for this.
             let join = Join::new(
                 (1, Uuid::new_v4().as_u128()),
-                Role::Backend(format!("{}:{}", "localhost", our_port)),
+                Role::Backend(format!("{}:{}", fqdn, our_port)),
                 version,
                 false,
             );
