@@ -1,0 +1,26 @@
+[package]
+edition = "2021"
+name = "frontend"
+version = "0.1.0"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+crossbeam = "0.8"
+env_logger = "0.10"
+log = "0.4"
+rayon = "1.7"
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "1.0"
+toml = "0.8"
+uuid = { version = "1.4", features = ["serde", "v4"] }
+
+config = { path = "../config" }
+net = { path = "../net" }
+io = { path = "../io" }
+requests = { path = "../requests" }
+necronomicon = { git = "https://github.com/nyanzoo/necronomicon", branch = "master" }
+phylactery = { git = "https://github.com/nyanzoo/phylactery", branch = "develop" }
+
+
+[dev-dependencies]

@@ -1,128 +1,76 @@
 version: 3
 
+includes:
+  backend:
+    taskfile: ./backend/Taskfile.yaml
+    dir: ./backend
+
+  frontend:
+    taskfile: ./frontend/Taskfile.yaml
+    dir: ./frontend
+
+  operator:
+    taskfile: ./operator/Taskfile.yaml
+    dir: ./operator
+
+  example-client:
+    taskfile: ./examples/client-test/Taskfile.yaml
+    dir: ./examples/client-test
+
 tasks:
-  clippy:
+  build-debug:
     cmds:
-      - cargo clippy --all-targets --all-features -- -D warnings
+      - task: backend:build-debug
+      - task: frontend:build-debug
+      - task: operator:build-debug
 
   build-release:
-    internal: true
     cmds:
-      - cargo build --release --features {{.FEATURE}}
+      - task: backend:build-release
+      - task: frontend:build-release
+      - task: operator:build-release
 
-  build-backend-release:
+  clippy:
     cmds:
-      - task: build-release
-        vars:
-          FEATURE: backend
-
-  build-frontend-release:
-    cmds:
-      - task: build-release
-        vars:
-          FEATURE: frontend
-
-  build-operator-release:
-    cmds:
-      - task: build-release
-        vars:
-          FEATURE: operator
-
-  build-image:
-    internal: true
-    cmds:
-      - docker build -f Dockerfile -t {{.DOCKER_IMAGE}} -f Dockerfile.{{.FEATURE}} .
-
-  build-backend-image:
-    cmds:
-      - task: build-image
-        vars:
-          DOCKER_IMAGE: backend
-          FEATURE: backend
-
-  build-frontend-image:
-    cmds:
-      - task: build-image
-        vars:
-          DOCKER_IMAGE: frontend
-          FEATURE: frontend
-
-  build-operator-image:
-    cmds:
-      - task: build-image
-        vars:
-          DOCKER_IMAGE: operator
-          FEATURE: operator
+      - task: backend:clippy
+      - task: frontend:clippy
+      - task: operator:clippy
 
   build-all-images:
     cmds:
-      - task: build-backend-image
-      - task: build-frontend-image
-      - task: build-operator-image
-
-  tag-image:
-    internal: true
-    cmds:
-      - docker tag {{.DOCKER_IMAGE}} nyanzebra/{{.DOCKER_IMAGE}}:{{.VERSION}}
-
-  tag-backend-image:
-    cmds:
-      - task: tag-image
-        vars:
-          DOCKER_IMAGE: backend
-          VERSION: latest
-
-  tag-frontend-image:
-    cmds:
-      - task: tag-image
-        vars:
-          DOCKER_IMAGE: frontend
-          VERSION: latest
-
-  tag-operator-image:
-    cmds:
-      - task: tag-image
-        vars:
-          DOCKER_IMAGE: operator
-          VERSION: latest
+      - task: backend:build-image
+      - task: frontend:build-image
+      - task: operator:build-image
 
   tag-all-images:
     cmds:
-      - task: tag-backend-image
-      - task: tag-frontend-image
-      - task: tag-operator-image
-
-  push-image:
-    internal: true
-    cmds:
-      - docker push nyanzebra/{{.DOCKER_IMAGE}}:{{.VERSION}}
-
-  push-backend-image:
-    cmds:
-      - task: push-image
+      - task: backend:tag-image
         vars:
-          DOCKER_IMAGE: backend
+          REGISTRY: nyanzebra
           VERSION: latest
-
-  push-frontend-image:
-    cmds:
-      - task: push-image
+      - task: frontend:tag-image
         vars:
-          DOCKER_IMAGE: frontend
+          REGISTRY: nyanzebra
           VERSION: latest
-
-  push-operator-image:
-    cmds:
-      - task: push-image
+      - task: operator:tag-image
         vars:
-          DOCKER_IMAGE: operator
+          REGISTRY: nyanzebra
           VERSION: latest
 
   push-all-images:
     cmds:
-      - task: push-backend-image
-      - task: push-frontend-image
-      - task: push-operator-image
+      - task: backend:push-image
+        vars:
+          REGISTRY: nyanzebra
+          VERSION: latest
+      - task: frontend:push-image
+        vars:
+          REGISTRY: nyanzebra
+          VERSION: latest
+      - task: operator:push-image
+        vars:
+          REGISTRY: nyanzebra
+          VERSION: latest
 
   helm-package:
     cmds:
@@ -164,11 +112,13 @@ tasks:
 
   client-test:
     cmds:
-      - cargo run --release --example client -- -H 127.0.0.1 -p 6666 put -k cat -v cute
+      - task: example-client:put
+      - task: example-client:get
+      - task: example-client:delete
+      - task: example-client:get
 
   get-logs:
     cmds:
       - mkdir -p ./logs
       - kubectl get pods -o=jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | xargs -I {} sh -c 'kubectl logs {} > ./logs/{}.log'
       - kubectl get pods -o=jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | xargs -I {} sh -c 'kubectl logs -p {} > ./logs/{}.p.log'
-

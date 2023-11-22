@@ -1,0 +1,25 @@
+[package]
+edition = "2021"
+name = "io"
+version = "0.1.0"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+crossbeam = "0.8"
+log = "0.4"
+rayon = "1.7"
+thiserror = "1.0"
+
+net = { path = "../net" }
+requests = { path = "../requests", features = ["backend"] }
+necronomicon = { git = "https://github.com/nyanzoo/necronomicon", branch = "master" }
+# necronomicon = { path = "../necronomicon" }
+phylactery = { git = "https://github.com/nyanzoo/phylactery", branch = "develop" }
+# phylactery = { path = "../phylactery" }
+
+
+[dev-dependencies]
+net = { path = "../net", features = ["tests"] }
+lazy_static = "1.4"
+matches = "0.1"

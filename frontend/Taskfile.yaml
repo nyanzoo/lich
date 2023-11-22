@@ -1,0 +1,32 @@
+version: 3
+
+tasks:
+  build-debug:
+    cmds:
+      - cargo build
+
+  build-release:
+    cmds:
+      - cargo build --release
+
+  build-image:
+    cmds:
+      - docker build -f Dockerfile -t frontend ..
+
+  clippy:
+    cmds:
+      - cargo clippy --all-targets --all-features -- -D warnings
+
+  tag-image:
+    internal: true
+    cmds:
+      - docker tag frontend {{.REGISTRY}}/frontend:{{.VERSION}}
+
+  push-image:
+    internal: true
+    cmds:
+      - docker push {{.REGISTRY}}/frontend:{{.VERSION}}
+
+  test:
+    cmds:
+      - cargo test --all-targets --all-features

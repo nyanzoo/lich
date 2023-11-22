@@ -17,7 +17,7 @@ COPY . .
 RUN cargo build --release --features backend --bin lich
 
 # We do not need the Rust toolchain to run the binary!
-FROM debian:bookworm-slim AS runtime
+FROM debian:stable-slim AS runtime
 RUN apt-get update && apt-get install -y net-tools dnsutils netcat-openbsd
 COPY --from=builder /app/target/release/lich /usr/local/bin
 ENV RUST_BACKTRACE=1

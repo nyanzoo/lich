@@ -6,15 +6,14 @@ use std::{
 
 use crossbeam::channel::{bounded, Receiver, Sender};
 use log::{debug, error, info, trace, warn};
-
-use necronomicon::{full_decode, Encode};
 use rayon::{ThreadPool, ThreadPoolBuilder};
 
-use crate::common::{
-    reqres::{ClientRequest, ClientResponse, ProcessRequest},
+use net::{
     session::{Session, SessionReader, SessionWriter},
     stream::TcpListener,
 };
+use requests::{ClientRequest, ClientResponse, ProcessRequest};
+use necronomicon::{full_decode, Encode};
 
 /// # Description
 /// This is for accepting incoming requests.
@@ -56,7 +55,10 @@ impl Incoming {
             match stream {
                 Ok(stream) => {
                     let session = Session::new(stream, 5);
-                    if let Some(old_session) = session_map.insert(session.peer_addr(), session.clone()) {
+                    if let Some(old_session) =
+                        session_map.insert(session.peer_addr(), session.clone())
+                    {
+                        trace!("killing old session {:?}", old_session);
                         _ = old_session.shutdown();
                     }
 
@@ -142,8 +144,8 @@ fn handle_requests(
                 }
             }
             Err(err) => {
-                // warn!("warn: {}", err);
-                writer.flush().expect("flush");
+                trace!("closing session due to err: {err}");
+                break;
             }
         }
     }
