@@ -1,11 +1,11 @@
 use std::{io::Write, sync::Arc};
 
-use net::session::SessionWriter;
 use log::{debug, error, info, trace};
 use necronomicon::{
     system_codec::{Join, Position, Report, Role},
     Encode, CHAIN_NOT_READY,
 };
+use net::session::SessionWriter;
 
 use parking_lot::Mutex;
 
@@ -284,6 +284,7 @@ impl ClusterInner {
             };
             debug!("sending report to backend: {:?}", report);
             report.encode(&mut backend.session)?;
+            backend.session.flush()?;
         }
 
         Ok(())
@@ -332,11 +333,11 @@ impl Cluster {
 
 #[cfg(test)]
 mod tests {
-    use net::{session::Session, stream::TcpStream};
     use necronomicon::{
         system_codec::{Join, JoinAck, Position, Report, Role},
         Packet, CHAIN_NOT_READY, SUCCESS,
     };
+    use net::{session::Session, stream::TcpStream};
 
     use super::Cluster;
 
@@ -344,7 +345,7 @@ mod tests {
     fn add_backend() {
         let cluster = Cluster::default();
 
-        let head_stream = TcpStream::connect("head").unwrap();
+        let head_stream = TcpStream::connect("head:6666".to_owned()).unwrap();
         let (_, head) = Session::new(head_stream.clone(), 100).split();
 
         let join = Join::new((1, 1), Role::Backend("head".to_owned()), 1, false);
@@ -356,7 +357,7 @@ mod tests {
             Packet::Report(Report::new((1, 1), Position::Tail { candidate: None })),
         ]);
 
-        let middle_stream = TcpStream::connect("middle").unwrap();
+        let middle_stream = TcpStream::connect("middle:6666".to_owned()).unwrap();
         let (_, middle) = Session::new(middle_stream.clone(), 100).split();
 
         let join = Join::new((1, 2), Role::Backend("middle".to_owned()), 1, false);
@@ -375,7 +376,7 @@ mod tests {
             },
         ))]);
 
-        let tail_stream = TcpStream::connect("tail").unwrap();
+        let tail_stream = TcpStream::connect("tail:6666".to_owned()).unwrap();
         let (_, tail) = Session::new(tail_stream.clone(), 100).split();
 
         let join = Join::new((1, 3), Role::Backend("tail".to_owned()), 1, false);
@@ -409,7 +410,7 @@ mod tests {
     fn add_frontend() {
         let cluster = Cluster::default();
 
-        let frontend_stream = TcpStream::connect("frontend").unwrap();
+        let frontend_stream = TcpStream::connect("frontend".to_owned()).unwrap();
         let (_, frontend) = Session::new(frontend_stream.clone(), 100).split();
 
         let join = Join::new((1, 1), Role::Frontend("frontend".to_owned()), 1, false);
@@ -418,7 +419,7 @@ mod tests {
 
         frontend_stream.verify_writes(&[Packet::JoinAck(JoinAck::new((1, 1), CHAIN_NOT_READY))]);
 
-        let head_tail_stream = TcpStream::connect("head_tail").unwrap();
+        let head_tail_stream = TcpStream::connect("head_tail".to_owned()).unwrap();
         let (_, head_tail) = Session::new(head_tail_stream.clone(), 100).split();
 
         let join = Join::new((1, 2), Role::Backend("head_tail".to_owned()), 1, false);
@@ -430,8 +431,21 @@ mod tests {
             Packet::Report(Report::new((1, 2), Position::Tail { candidate: None })),
         ]);
 
-        // Frontend doesn't get report until it joins again.
-        let join = Join::new((1, 3), Role::Frontend("frontend".to_owned()), 1, false);
+        // Frontend gets report when BE joins.
+        frontend_stream.verify_writes(&[
+            Packet::Report(Report::new(
+                (1, 2),
+                Position::Frontend {
+                    head: Some("head_tail".to_owned()),
+                    tail: Some("head_tail".to_owned()),
+                },
+            )),
+        ]);
+
+        // New frontend gets report when it joins.
+        let frontend_stream = TcpStream::connect("new_frontend".to_owned()).unwrap();
+        let (_, frontend) = Session::new(frontend_stream.clone(), 100).split();
+        let join = Join::new((1, 3), Role::Frontend("new_frontend".to_owned()), 1, false);
 
         cluster.add(frontend.clone(), join).expect("add frontend");
         frontend_stream.verify_writes(&[
@@ -450,7 +464,7 @@ mod tests {
     fn store_transfer() {
         let cluster = Cluster::default();
 
-        let head_stream = TcpStream::connect("head").unwrap();
+        let head_stream = TcpStream::connect("head".to_owned()).unwrap();
         let (_, head) = Session::new(head_stream.clone(), 100).split();
 
         let join = Join::new((1, 1), Role::Backend("head".to_owned()), 1, false);
@@ -464,7 +478,7 @@ mod tests {
 
         // Create a tail stream and drop it.
         {
-            let tail_stream = TcpStream::connect("tail").unwrap();
+            let tail_stream = TcpStream::connect("tail".to_owned()).unwrap();
             let (_, tail) = Session::new(tail_stream.clone(), 100).split();
 
             let join = Join::new((1, 2), Role::Backend("tail".to_owned()), 1, false);
@@ -499,7 +513,7 @@ mod tests {
 
         // Rejoin the tail and check that it is now a candidate. Head should become Tail.
 
-        let tail_stream = TcpStream::connect("tail").unwrap();
+        let tail_stream = TcpStream::connect("tail".to_owned()).unwrap();
         let (_, tail) = Session::new(tail_stream.clone(), 100).split();
 
         let join = Join::new((1, 4), Role::Backend("tail".to_owned()), 1, false);
@@ -538,13 +552,13 @@ mod tests {
         ))]);
     }
 
-    #[test]
-    fn add_observer() {
-        todo!("add observer")
-    }
+    // #[test]
+    // fn add_observer() {
+    //     todo!("add observer")
+    // }
 
-    #[test]
-    fn cluster_restart() {
-        todo!("cluster restart")
-    }
+    // #[test]
+    // fn cluster_restart() {
+    //     todo!("cluster restart")
+    // }
 }

@@ -1,4 +1,3 @@
-
 use std::{
     cell::{RefCell, RefMut},
     cmp,
@@ -167,11 +166,7 @@ impl Drop for TcpStreamInner {
 }
 
 impl TcpStream {
-    pub fn connect<A>(addr: A) -> std::io::Result<Self>
-    where
-        A: ToSocketAddrs,
-    {
-        let addr = addr.to_socket_addrs()?.next().expect("next").to_string();
+    pub fn connect(addr: String) -> std::io::Result<Self> {
         if let Some(stream) = CONNECTIONS.get(addr.clone()) {
             match stream {
                 Connection::Accept(stream) => return Ok(stream.clone()),
@@ -187,9 +182,8 @@ impl TcpStream {
         Ok(stream)
     }
 
-    pub fn retryable_connect<A, P>(addr: A, mut policy: P) -> std::io::Result<Self>
+    pub fn retryable_connect<P>(addr: String, mut policy: P) -> std::io::Result<Self>
     where
-        A: ToSocketAddrs + Clone + std::fmt::Debug,
         P: super::RetryPolicy,
     {
         loop {

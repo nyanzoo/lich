@@ -4,9 +4,9 @@ use log::{debug, error, info, trace};
 use rayon::ThreadPoolBuilder;
 
 use config::OperatorConfig;
+use necronomicon::full_decode;
 use net::{session::Session, stream::TcpListener};
 use requests::System;
-use necronomicon::full_decode;
 
 use crate::operator::Cluster;
 

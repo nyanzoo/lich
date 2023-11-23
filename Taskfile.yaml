@@ -18,6 +18,12 @@ includes:
     dir: ./examples/client-test
 
 tasks:
+  test:
+    cmds:
+      - task: backend:test
+      - task: frontend:test
+      - task: operator:test
+
   build-debug:
     cmds:
       - task: backend:build-debug
@@ -105,8 +111,17 @@ tasks:
       - task: helm-uninstall
       - task: helm-install
 
+  cluster-create:
+    cmds:
+      - k3d cluster create lich
+
+  cluster-delete:
+    cmds:
+      - k3d cluster delete lich
+
   cluster-recreate:
     cmds:
+      - task: prune-docker
       - k3d cluster delete lich
       - k3d cluster create lich
 
@@ -119,6 +134,9 @@ tasks:
 
   get-logs:
     cmds:
-      - mkdir -p ./logs
-      - kubectl get pods -o=jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | xargs -I {} sh -c 'kubectl logs {} > ./logs/{}.log'
-      - kubectl get pods -o=jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | xargs -I {} sh -c 'kubectl logs -p {} > ./logs/{}.p.log'
+      - ./scripts/get-logs.sh
+
+  prune-docker:
+    cmds:
+      - docker system prune -f -a # clean up all docker images for space
+      

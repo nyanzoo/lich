@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     io::{BufReader, Write},
-    net::{Shutdown, ToSocketAddrs},
+    net::Shutdown,
     thread::JoinHandle,
     time::Duration,
 };
@@ -12,13 +12,13 @@ use uuid::Uuid;
 
 use config::EndpointConfig;
 use io::outgoing::Outgoing;
-use net::stream::{RetryConsistent, TcpStream};
-use requests::{ClientResponse, PendingRequest, ProcessRequest, System};
 use necronomicon::{
     full_decode,
     system_codec::{Join, Position, Role},
     Ack, Encode, Packet,
 };
+use net::stream::{RetryConsistent, TcpStream};
+use requests::{ClientResponse, PendingRequest, ProcessRequest, System};
 
 const CHANNEL_CAPACITY: usize = 1024;
 
@@ -469,10 +469,7 @@ impl Drop for OperatorConnection {
 }
 
 impl OperatorConnection {
-    fn connect<A>(addr: A, our_port: u16) -> Self
-    where
-        A: ToSocketAddrs + Clone + std::fmt::Debug,
-    {
+    fn connect(addr: String, our_port: u16) -> Self {
         let (operator_tx, state_rx) = bounded(CHANNEL_CAPACITY);
         let (state_tx, operator_rx) = bounded(CHANNEL_CAPACITY);
         let (kill_tx, kill_rx) = bounded(CHANNEL_CAPACITY);
