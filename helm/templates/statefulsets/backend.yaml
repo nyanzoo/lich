@@ -2,6 +2,8 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: backend
+  labels:
+    app: backend
 spec:
   selector:
     matchLabels:
@@ -13,6 +15,8 @@ spec:
       labels:
         app: backend
     spec:
+      nodeSelector:
+        app: backend
       containers:
         - name: backend
           image: {{ .Values.backend.image }}
@@ -24,7 +28,7 @@ spec:
             - name: backend-config
               mountPath: /etc/lich
               readOnly: true
-            - name: backend
+            - name: backend-pv
               mountPath: /opt/lich
               readOnly: false
           resources:
@@ -37,6 +41,6 @@ spec:
         - name: backend-config
           configMap:
             name: backend-config
-        - name: backend
+        - name: backend-pv
           persistentVolumeClaim:
             claimName: backend-pvc

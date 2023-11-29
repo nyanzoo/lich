@@ -78,6 +78,18 @@ tasks:
           REGISTRY: nyanzebra
           VERSION: latest
 
+  k3d-load-images:
+    cmds:
+      - task: backend:k3d-load-image
+        vars:
+          CLUSTER: lich
+      - task: frontend:k3d-load-image
+        vars:
+          CLUSTER: lich
+      - task: operator:k3d-load-image
+        vars:
+          CLUSTER: lich
+
   helm-package:
     cmds:
       - helm package helm
@@ -99,21 +111,20 @@ tasks:
   deploy:
     cmds:
       - task: build-all-images
-      - task: tag-all-images
-      - task: push-all-images
+      - task: k3d-load-images
+      # - task: tag-all-images
+      # - task: push-all-images
       - task: helm-install
 
   redeploy:
     cmds:
-      - task: build-all-images
-      - task: tag-all-images
-      - task: push-all-images
       - task: helm-uninstall
-      - task: helm-install
+      - task: deploy
 
   cluster-create:
     cmds:
-      - k3d cluster create lich
+      - k3d cluster create lich --volume /tmp/lich:/opt/lich
+      - kubectl label node k3d-lich-server-0 app=backend
 
   cluster-delete:
     cmds:
@@ -122,8 +133,8 @@ tasks:
   cluster-recreate:
     cmds:
       - task: prune-docker
-      - k3d cluster delete lich
-      - k3d cluster create lich
+      - task: cluster-delete
+      - task: cluster-create
 
   client-test:
     cmds:
@@ -139,4 +150,3 @@ tasks:
   prune-docker:
     cmds:
       - docker system prune -f -a # clean up all docker images for space
-      

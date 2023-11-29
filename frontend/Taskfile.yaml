@@ -27,6 +27,11 @@ tasks:
     cmds:
       - docker push {{.REGISTRY}}/frontend:{{.VERSION}}
 
+  k3d-load-image:
+    internal: true
+    cmds:
+      - k3d image import frontend -c {{.CLUSTER}}
+
   test:
     cmds:
       - cargo test --all-targets --all-features

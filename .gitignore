@@ -23,4 +23,4 @@ lcov.info
 **/*.tgz
 
 # log files
-**/*.log
+kube_logs

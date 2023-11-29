@@ -15,6 +15,9 @@ for pod in $pods; do
     pod_name=$(echo $pod | cut -d: -f2)
     pod_phase=$(echo $pod | cut -d: -f3)
 
+    mkdir -p "$log_dir/$namespace/logs"
+    mkdir -p "$log_dir/$namespace/describe"
+
     # Create a directory for the pod within the timestamped folder
     pod_log="$log_dir/$namespace/logs/$pod_name.log"
     pod_describe="$log_dir/$namespace/describe/$pod_name.txt"

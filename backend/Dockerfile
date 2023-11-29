@@ -14,12 +14,13 @@ COPY --from=planner /app/recipe.json recipe.json
 RUN cargo chef cook --release --recipe-path recipe.json
 # Build application
 COPY . .
+RUN mkdir -p /opt/lich  # Create the directory here
 RUN cargo build --release -p backend
 
 # We do not need the Rust toolchain to run the binary!
 FROM debian:stable-slim AS runtime
 RUN apt-get update && apt-get install -y net-tools dnsutils netcat-openbsd
+RUN mkdir -p /opt/lich
 COPY --from=builder /app/target/release/backend /usr/local/bin
 ENV RUST_BACKTRACE=1
 ENTRYPOINT ["/usr/local/bin/backend"]
-# ENTRYPOINT [ "sleep", "infinity" ]

@@ -1,6 +1,6 @@
 backend:
-  image: nyanzebra/backend
-  imagePullPolicy: Always
+  image: backend
+  imagePullPolicy: IfNotPresent
   replicas: 3
   logLevel: trace
   config: |
@@ -14,8 +14,8 @@ backend:
     node_size = 1048576
     version = 1
 frontend:
-  image: nyanzebra/frontend
-  imagePullPolicy: Always
+  image: frontend
+  imagePullPolicy: IfNotPresent
   replicas: 3
   logLevel: trace
   config: |
@@ -23,8 +23,8 @@ frontend:
     port=6666
     operator_addr='operator-0.operator.default.svc.cluster.local:6666'
 operator:
-  image: nyanzebra/operator
-  imagePullPolicy: Always
+  image: operator
+  imagePullPolicy: IfNotPresent
   logLevel: trace
   config: |
     port=6666
