@@ -1,5 +1,8 @@
 For configuring
 https://github.com/kubernetes/kubernetes/issues/45779
 
-For some reason the PV/PVC are not getting deployed with helm install always... need to investigate further...
-Also sometimes on good deployments the traffic gets stuck. See logs for more info.
+BUGS:
+- Sometimes on good deployments the traffic gets stuck, seems to be from sending from incoming? See logs for more info.
+- We get crash on sends for channels because the receiver drops and that seems to be caused due to connection failure.
+  So, we need to make that more robust.
+- Sometimes after a deployment the services don't connect to form a chain with `error failed to lookup address information: Name or service not known`

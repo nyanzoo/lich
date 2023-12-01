@@ -9,8 +9,6 @@ use hashlink::LinkedHashMap;
 use log::{trace, warn};
 
 use config::StoreConfig;
-use requests::ClientRequest;
-use util::megabytes;
 use necronomicon::{
     kv_store_codec::Key, system_codec::Transfer, Decode, Encode, Packet,
     FAILED_TO_PUSH_TO_TRANSACTION_LOG, INTERNAL_ERROR, KEY_DOES_NOT_EXIST, QUEUE_ALREADY_EXISTS,
@@ -23,6 +21,8 @@ use phylactery::{
     kv_store::{Graveyard, KVStore, Lookup},
     ring_buffer::{self, ring_buffer},
 };
+use requests::ClientRequest;
+use util::megabytes;
 
 use crate::error::Error;
 
@@ -83,8 +83,7 @@ impl Store<String> {
         trace!("creating mmap buffer at {}", mmap_path);
         let mmap = MmapBuffer::new(mmap_path, megabytes(1)).expect("mmap buffer");
         trace!("create push and pop for graveyard");
-        let (pusher, popper) =
-            ring_buffer(mmap, api_version).map_err(phylactery::Error::RingBuffer)?;
+        let (pusher, popper) = ring_buffer(mmap, api_version)?;
 
         let graveyard_path = format!("{}/graveyard", config.path);
         let graveyard_path = PathBuf::from(graveyard_path);
@@ -103,8 +102,7 @@ impl Store<String> {
         trace!("creating transaction log at {}", tl_path);
         let mmap = MmapBuffer::new(tl_path, megabytes(1))?;
 
-        let (transaction_log_tx, transaction_log_rx) =
-            ring_buffer(mmap, api_version).map_err(phylactery::Error::RingBuffer)?;
+        let (transaction_log_tx, transaction_log_rx) = ring_buffer(mmap, api_version)?;
 
         trace!("creating kv store at {} & {}", meta_path, data_path);
         let mut kvs = KVStore::new(
@@ -114,8 +112,7 @@ impl Store<String> {
             config.node_size,
             api_version,
             pusher,
-        )
-        .map_err(phylactery::Error::KVStore)?;
+        )?;
 
         // NOTE: we might want to consider not storing the version this way.
         // As it prohibits the user from using this key.
@@ -153,12 +150,13 @@ impl Store<String> {
         self.store_version
     }
 
-    fn update_version(&mut self, version: u128) {
+    fn update_version(&mut self) -> Result<(), Error> {
+        self.store_version += 1;
         let mut buf = vec![];
-        version.encode(&mut buf).expect("encode version");
+        self.store_version.encode(&mut buf).expect("encode version");
         self.kvs
-            .insert(Key::try_from("version").expect("store version"), &buf)
-            .expect("set version");
+            .insert(Key::try_from("version").expect("store version"), &buf)?;
+        Ok(())
     }
 
     pub(crate) fn add_to_pending(&mut self, patch: ClientRequest) {
@@ -191,7 +189,7 @@ impl Store<String> {
         patch.encode(&mut tl_patch).expect("must be able to encode");
 
         while let Err(err) = self.transaction_log_tx.push(&tl_patch) {
-            if let phylactery::ring_buffer::Error::EntryTooBig { .. } = err {
+            if let phylactery::Error::EntryTooBig { .. } = err {
                 let mut buf = vec![];
                 self.transaction_log_rx
                     .pop(&mut buf)
@@ -218,7 +216,13 @@ impl Store<String> {
                         Ok(dequeue) => {
                             self.dequeues.insert(path.to_owned(), dequeue);
                             trace!("created queue {:?}", path);
-                            queue.ack()
+
+                            if let Err(err) = self.update_version() {
+                                warn!("failed to update version: {err:?}");
+                                queue.nack(INTERNAL_ERROR)
+                            } else {
+                                queue.ack()
+                            }
                         }
                         Err(_) => todo!(),
                     }
@@ -232,7 +236,13 @@ impl Store<String> {
                 let ack = if self.dequeues.remove(path).is_some() {
                     remove_dir(format!("{}/{}", self.root, path)).expect("must be able to remove");
                     trace!("deleted queue {:?}", path);
-                    queue.ack()
+
+                    if let Err(err) = self.update_version() {
+                        warn!("failed to update version: {err:?}");
+                        queue.nack(INTERNAL_ERROR)
+                    } else {
+                        queue.ack()
+                    }
                 } else {
                     warn!("queue({}) does not exist", path);
                     queue.nack(QUEUE_DOES_NOT_EXIST)
@@ -246,7 +256,13 @@ impl Store<String> {
                 let ack = if let Some(queue) = self.dequeues.get_mut(path) {
                     let push = queue.push(enqueue.value()).expect("queue full");
                     trace!("pushed to queue({}): {:?}", path, push);
-                    enqueue.ack()
+
+                    if let Err(err) = self.update_version() {
+                        warn!("failed to update version: {err:?}");
+                        enqueue.nack(INTERNAL_ERROR)
+                    } else {
+                        enqueue.ack()
+                    }
                 } else {
                     warn!("queue({}) does not exist", path);
                     enqueue.nack(QUEUE_DOES_NOT_EXIST)
@@ -260,7 +276,13 @@ impl Store<String> {
                 let ack = if let Some(queue) = self.dequeues.get_mut(path) {
                     let pop = queue.pop(buf).expect("queue empty");
                     trace!("popped from queue({}): {:?}", path, pop);
-                    dequeue.ack(buf.to_vec())
+
+                    if let Err(err) = self.update_version() {
+                        warn!("failed to update version: {err:?}");
+                        dequeue.nack(INTERNAL_ERROR)
+                    } else {
+                        dequeue.ack(buf.to_vec())
+                    }
                 } else {
                     warn!("queue({}) does not exist", path);
                     dequeue.nack(QUEUE_DOES_NOT_EXIST)
@@ -271,36 +293,58 @@ impl Store<String> {
 
             // kv store
             ClientRequest::Put(put) => match self.kvs.insert(*put.key(), put.value()) {
-                Ok(_) => Packet::PutAck(put.ack()),
+                Ok(_) => {
+                    self.store_version += 1;
+                    let ack = if let Err(err) = self.update_version() {
+                        warn!("failed to update version: {err:?}");
+                        put.nack(INTERNAL_ERROR)
+                    } else {
+                        put.ack()
+                    };
+
+                    Packet::PutAck(ack)
+                }
                 Err(err) => {
                     warn!("failed to insert into kv store: {}", err);
                     Packet::PutAck(put.nack(INTERNAL_ERROR))
                 }
             },
             ClientRequest::Delete(delete) => match self.kvs.delete(delete.key()) {
-                Ok(_) => Packet::DeleteAck(delete.ack()),
+                Ok(_) => {
+                    self.store_version += 1;
+                    let ack = if let Err(err) = self.update_version() {
+                        warn!("failed to update version: {err:?}");
+                        delete.nack(INTERNAL_ERROR)
+                    } else {
+                        delete.ack()
+                    };
+
+                    Packet::DeleteAck(ack)
+                }
                 Err(err) => {
                     warn!("failed to delete from kv store: {}", err);
                     Packet::DeleteAck(delete.nack(INTERNAL_ERROR))
                 }
             },
-            ClientRequest::Get(get) => match self.kvs.get(get.key(), buf) {
-                Ok(lookup) => match lookup {
-                    Lookup::Absent => Packet::GetAck(get.nack(KEY_DOES_NOT_EXIST)),
-                    Lookup::Found(found) => Packet::GetAck(get.ack(found.into_inner())),
-                },
-                Err(err) => {
-                    warn!("failed to get from kv store: {}", err);
-                    Packet::GetAck(get.nack(INTERNAL_ERROR))
-                }
-            },
+            ClientRequest::Get(get) => {
+                // NOTE: no need to update version as store did not change.
+                let ack = match self.kvs.get(get.key(), buf) {
+                    Ok(lookup) => match lookup {
+                        Lookup::Absent => get.nack(KEY_DOES_NOT_EXIST),
+                        Lookup::Found(found) => get.ack(found.into_inner()),
+                    },
+                    Err(err) => {
+                        warn!("failed to get from kv store: {}", err);
+                        get.nack(INTERNAL_ERROR)
+                    }
+                };
+
+                Packet::GetAck(ack)
+            }
 
             // other
             _ => panic!("invalid packet type {patch:?}"),
         };
-
-        self.store_version += 1;
-        self.update_version(self.store_version);
 
         res
     }
@@ -329,11 +373,11 @@ mod tests {
     use tempfile::tempdir;
 
     use config::StoreConfig;
-    use requests::ClientRequest;
     use necronomicon::{
         kv_store_codec::{Delete, Get, Key, Put},
         Packet,
     };
+    use requests::ClientRequest;
 
     use super::Store;
 

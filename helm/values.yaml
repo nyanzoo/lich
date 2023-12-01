@@ -2,7 +2,7 @@ backend:
   image: backend
   imagePullPolicy: IfNotPresent
   replicas: 3
-  logLevel: trace
+  logLevel: debug
   config: |
     [endpoints]
     port=6666
@@ -10,14 +10,14 @@ backend:
 
     [store]
     path = '/opt/lich'
-    meta_size = 1024
+    meta_size = 1048576
     node_size = 1048576
     version = 1
 frontend:
   image: frontend
   imagePullPolicy: IfNotPresent
   replicas: 3
-  logLevel: trace
+  logLevel: debug
   config: |
     [endpoints]
     port=6666
@@ -25,6 +25,6 @@ frontend:
 operator:
   image: operator
   imagePullPolicy: IfNotPresent
-  logLevel: trace
+  logLevel: debug
   config: |
     port=6666

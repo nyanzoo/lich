@@ -6,7 +6,7 @@ use std::{
 };
 
 use crossbeam::channel::{Receiver, Sender};
-use log::{info, trace};
+use log::{debug, info, trace};
 use requests::ClientResponse;
 
 use necronomicon::{full_decode, Encode, Packet};
@@ -47,13 +47,22 @@ impl Outgoing {
         requests_rx: Receiver<Packet>,
         ack_tx: Sender<ClientResponse>,
     ) -> Result<Self, Error> {
-        let addr = addr
-            .to_socket_addrs()?
-            .next()
-            .expect("no addr found")
-            .to_string();
-
         let mut retry = 50;
+
+        let addr = loop {
+            match addr.to_socket_addrs() {
+                Ok(mut addr) => break addr.next().expect("no addr found").to_string(),
+                Err(err) => {
+                    retry -= 1;
+                    if retry == 0 {
+                        return Err(Error::Connection);
+                    }
+                    debug!("failed to connect to outgoing: {err}, retries left {retry}");
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                }
+            }
+        };
+
         let stream = loop {
             match TcpStream::connect(addr.clone()) {
                 Ok(stream) => {
@@ -64,7 +73,7 @@ impl Outgoing {
                     if retry == 0 {
                         return Err(Error::Connection);
                     }
-                    info!("failed to connect to outgoing: {err}, retries left {retry}");
+                    debug!("failed to connect to outgoing: {err}, retries left {retry}");
                     std::thread::sleep(std::time::Duration::from_secs(1));
                 }
             }

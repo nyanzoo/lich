@@ -17,6 +17,10 @@ includes:
     taskfile: ./examples/client-test/Taskfile.yaml
     dir: ./examples/client-test
 
+  example-client-bench:
+    taskfile: ./examples/client-bench/Taskfile.yaml
+    dir: ./examples/client-bench
+
 tasks:
   test:
     cmds:
@@ -123,7 +127,7 @@ tasks:
 
   cluster-create:
     cmds:
-      - k3d cluster create lich --volume /tmp/lich:/opt/lich
+      - k3d cluster create lich --volume /tmp/lich:/opt/lich #-p 6666:6666
       - kubectl label node k3d-lich-server-0 app=backend
 
   cluster-delete:
@@ -142,6 +146,11 @@ tasks:
       - task: example-client:get
       - task: example-client:delete
       - task: example-client:get
+
+  client-bench:
+    cmds:
+      # - task: example-client-bench:put
+      - task: example-client-bench:put_and_get
 
   get-logs:
     cmds:

@@ -63,7 +63,7 @@ impl Incoming {
                     }
 
                     let requests_tx = requests_tx.clone();
-                    let (ack_tx, ack_rx) = bounded(0);
+                    let (ack_tx, ack_rx) = bounded(1024);
                     info!("new session {:?}", session);
                     let (read, write) = session.split();
                     let ack_writer = write.clone();

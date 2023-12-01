@@ -20,6 +20,7 @@ for pod in $pods; do
 
     # Create a directory for the pod within the timestamped folder
     pod_log="$log_dir/$namespace/logs/$pod_name.log"
+    pod_previous_log="$log_dir/$namespace/logs/$pod_name-previous.log"
     pod_describe="$log_dir/$namespace/describe/$pod_name.txt"
     
 
@@ -29,9 +30,9 @@ for pod in $pods; do
     # Check if the pod has restarted
     if [ "$restart_count" -gt 0 ]; then
         # Get logs for the pod and save to a file, including previous logs
-        kubectl logs --namespace="$namespace" "$pod_name" --all-containers --previous >"$pod_log" 2>&1
+        kubectl logs --namespace="$namespace" "$pod_name" --all-containers --previous >"$pod_previous_log" 2>&1
 
-        echo "Logs (including previous) for $pod_name saved to $pod_log"
+        echo "Logs (including previous) for $pod_name saved to $pod_previous_log"
     fi
 
     # If the pod is in a pending state, get a describe of the pod
