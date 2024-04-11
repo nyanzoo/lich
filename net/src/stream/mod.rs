@@ -1,11 +1,11 @@
-#[cfg(feature = "tests")]
+#[cfg(feature = "test")]
 mod test;
-#[cfg(feature = "tests")]
+#[cfg(feature = "test")]
 pub use test::*;
 
-#[cfg(not(feature = "tests"))]
+#[cfg(not(feature = "test"))]
 mod real;
-#[cfg(not(feature = "tests"))]
+#[cfg(not(feature = "test"))]
 pub use real::*;
 
 

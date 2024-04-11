@@ -9,7 +9,7 @@ use crossbeam::channel::{Receiver, Sender};
 use log::{debug, info, trace};
 use requests::ClientResponse;
 
-use necronomicon::{full_decode, Encode, Packet};
+use necronomicon::{full_decode, Encode, Packet, Pool, PoolImpl, SharedImpl};
 use net::stream::TcpStream;
 
 use crate::error::Error;
@@ -44,8 +44,9 @@ impl Drop for Outgoing {
 impl Outgoing {
     pub fn new(
         addr: impl ToSocketAddrs,
-        requests_rx: Receiver<Packet>,
-        ack_tx: Sender<ClientResponse>,
+        requests_rx: Receiver<Packet<SharedImpl>>,
+        ack_tx: Sender<ClientResponse<SharedImpl>>,
+        pool: PoolImpl,
     ) -> Result<Self, Error> {
         let mut retry = 50;
 
@@ -112,18 +113,31 @@ impl Outgoing {
         let write_handle = std::thread::spawn({
             let addr = addr.clone();
             move || loop {
-                match full_decode(&mut read) {
-                    Ok(packet) => {
-                        trace!("received packet {:?} on {addr}", packet);
-                        let response = ClientResponse::from(packet);
-                        if let Err(err) = ack_tx.send(response) {
-                            trace!("failed to send ack due to {err}");
-                            break;
+                let mut previous_decoded_header = None;
+                'pool: loop {
+                    let mut buffer = pool.acquire().expect("pool.acquire");
+                    'decode: loop {
+                        match full_decode(&mut read, &mut buffer, previous_decoded_header.take()) {
+                            Ok(packet) => {
+                                trace!("received packet {:?} on {addr}", packet);
+                                let response = ClientResponse::from(packet);
+                                if let Err(err) = ack_tx.send(response) {
+                                    trace!("failed to send ack due to {err}");
+                                    break 'pool;
+                                }
+                            }
+                            Err(necronomicon::Error::BufferTooSmallForPacketDecode {
+                                header,
+                                ..
+                            }) => {
+                                let _ = previous_decoded_header.insert(header);
+                                break 'decode;
+                            }
+                            Err(err) => {
+                                trace!("reader closed due to {err}");
+                                break 'pool;
+                            }
                         }
-                    }
-                    Err(err) => {
-                        trace!("reader closed due to {err}");
-                        break;
                     }
                 }
             }
@@ -145,10 +159,7 @@ mod tests {
 
     use matches::assert_matches;
 
-    use necronomicon::{
-        kv_store_codec::{Key, Put},
-        Packet,
-    };
+    use necronomicon::{binary_data, kv_store_codec::Put, Packet, PoolImpl};
     use net::stream::{gaurantee_address_rejection, get_connection};
     use requests::ClientResponse;
 
@@ -163,7 +174,8 @@ mod tests {
         let (_, requests_rx) = crossbeam::channel::unbounded();
         let (ack_tx, _) = crossbeam::channel::unbounded();
         gaurantee_address_rejection(ADDRESS, ErrorKind::ConnectionRefused);
-        let outgoing = Outgoing::new(ADDRESS, requests_rx, ack_tx);
+        let pool = PoolImpl::new(1, 1024);
+        let outgoing = Outgoing::new(ADDRESS, requests_rx, ack_tx, pool);
         assert_matches!(outgoing, Err(Error::Connection));
     }
 
@@ -174,14 +186,11 @@ mod tests {
         let (requests_tx, requests_rx) = crossbeam::channel::unbounded();
         let (ack_tx, ack_rx) = crossbeam::channel::unbounded();
 
-        let outgoing = Outgoing::new(ADDRESS, requests_rx, ack_tx);
+        let pool = PoolImpl::new(1, 1024);
+        let outgoing = Outgoing::new(ADDRESS, requests_rx, ack_tx, pool);
         assert_matches!(outgoing, Ok(_));
 
-        let put = Put::new(
-            (1, 0),
-            Key::try_from("key").expect("key"),
-            b"value".to_vec(),
-        );
+        let put = Put::new(1, 0, binary_data(b"key"), binary_data(b"value"));
 
         requests_tx
             .send(Packet::Put(put.clone()))

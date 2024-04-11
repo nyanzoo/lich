@@ -7,7 +7,7 @@ version = "0.1.0"
 
 [dependencies]
 crossbeam = "0.8"
-env_logger = "0.10"
+env_logger = "0.11"
 log = "0.4"
 parking_lot = "0.12"
 rayon = "1.7"
@@ -18,9 +18,10 @@ toml = "0.8"
 config = { path = "../config" }
 net = { path = "../net" }
 requests = { path = "../requests" }
-necronomicon = { git = "https://github.com/nyanzoo/necronomicon", branch = "master" }
+
+necronomicon = { git = "https://github.com/nyanzoo/necronomicon", branch = "develop" }
 phylactery = { git = "https://github.com/nyanzoo/phylactery", branch = "develop" }
 
 
 [dev-dependencies]
-net = { path = "../net", features = ["tests"] }
+net = { path = "../net", features = ["test"] }

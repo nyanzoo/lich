@@ -7,8 +7,8 @@ version = "0.1.0"
 
 [dependencies]
 crossbeam = "0.8"
-env_logger = "0.10"
-hashlink = "0.8"
+env_logger = "0.11"
+hashlink = "0.9"
 log = "0.4"
 rayon = "1.7"
 serde = { version = "1.0", features = ["derive"] }
@@ -17,13 +17,13 @@ toml = "0.8"
 uuid = { version = "1.4", features = ["serde", "v4"] }
 
 config = { path = "../config" }
-net = { path = "../net" }
 io = { path = "../io" }
+net = { path = "../net" }
 requests = { path = "../requests", features = ["backend"] }
 util = { path = "../util" }
-necronomicon = { git = "https://github.com/nyanzoo/necronomicon", branch = "master" }
-phylactery = { git = "https://github.com/nyanzoo/phylactery", branch = "develop" }
 
+necronomicon = { git = "https://github.com/nyanzoo/necronomicon", branch = "develop" }
+phylactery = { git = "https://github.com/nyanzoo/phylactery", branch = "develop" }
 
 [dev-dependencies]
 tempfile = "3.8"

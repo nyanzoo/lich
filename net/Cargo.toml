@@ -10,10 +10,13 @@ lazy_static = { version = "1.4", optional = true }
 log = "0.4"
 parking_lot = { version = "0.12", optional = true }
 
-necronomicon = { git = "https://github.com/nyanzoo/necronomicon", branch = "master", optional = true }
+necronomicon = { git = "https://github.com/nyanzoo/necronomicon", branch = "develop", optional = true }
 
 [dev-dependencies]
+necronomicon = { git = "https://github.com/nyanzoo/necronomicon", branch = "develop", features = [
+    "test",
+] }
 
 [features]
 default = []
-tests = ["lazy_static", "necronomicon", "parking_lot"]
+test = ["lazy_static", "necronomicon/test", "parking_lot"]

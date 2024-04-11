@@ -10,7 +10,7 @@ crossbeam = "0.8"
 log = "0.4"
 thiserror = "1.0"
 
-necronomicon = { git = "https://github.com/nyanzoo/necronomicon", branch = "master" }
+necronomicon = {git = "https://github.com/nyanzoo/necronomicon", branch = "develop"}
 
 [dev-dependencies]
 

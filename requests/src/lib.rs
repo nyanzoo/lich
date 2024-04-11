@@ -10,26 +10,32 @@ use necronomicon::{
     },
     kv_store_codec::{self, Get, GetAck, Put, PutAck},
     system_codec::{Join, JoinAck, Ping, PingAck, Report, ReportAck, Transfer, TransferAck},
-    Ack, Decode, Encode, Header, Kind, Packet, PartialDecode,
+    Ack, Decode, DecodeOwned, Encode, Header, Kind, Owned, Packet, PartialDecode, Shared, Uuid,
 };
 
 #[derive(Clone, Debug)]
-pub enum System {
-    Join(Join),
+pub enum System<S>
+where
+    S: Shared,
+{
+    Join(Join<S>),
     JoinAck(JoinAck),
 
     Ping(Ping),
     PingAck(PingAck),
 
-    Report(Report),
+    Report(Report<S>),
     ReportAck(ReportAck),
 
-    Transfer(Transfer),
+    Transfer(Transfer<S>),
     TransferAck(TransferAck),
 }
 
-impl From<Packet> for System {
-    fn from(value: Packet) -> Self {
+impl<S> From<Packet<S>> for System<S>
+where
+    S: Shared,
+{
+    fn from(value: Packet<S>) -> Self {
         match value {
             Packet::Join(join) => System::Join(join),
             Packet::JoinAck(join_ack) => System::JoinAck(join_ack),
@@ -49,27 +55,33 @@ impl From<Packet> for System {
 }
 
 #[derive(Clone, Debug)]
-pub enum ClientRequest {
+pub enum ClientRequest<S>
+where
+    S: Shared,
+{
     // dequeue
-    CreateQueue(Create),
-    DeleteQueue(dequeue_codec::Delete),
-    Enqueue(Enqueue),
-    Dequeue(Dequeue),
-    Peek(Peek),
-    Len(Len),
+    CreateQueue(Create<S>),
+    DeleteQueue(dequeue_codec::Delete<S>),
+    Enqueue(Enqueue<S>),
+    Dequeue(Dequeue<S>),
+    Peek(Peek<S>),
+    Len(Len<S>),
 
     // kv store
-    Put(Put),
-    Get(Get),
-    Delete(kv_store_codec::Delete),
+    Put(Put<S>),
+    Get(Get<S>),
+    Delete(kv_store_codec::Delete<S>),
 
     // transfer
     #[cfg(feature = "backend")]
-    Transfer(Transfer),
+    Transfer(Transfer<S>),
 }
 
-impl Into<Packet> for ClientRequest {
-    fn into(self) -> Packet {
+impl<S> Into<Packet<S>> for ClientRequest<S>
+where
+    S: Shared,
+{
+    fn into(self) -> Packet<S> {
         match self {
             // dequeue
             ClientRequest::CreateQueue(packet) => Packet::CreateQueue(packet),
@@ -91,25 +103,28 @@ impl Into<Packet> for ClientRequest {
     }
 }
 
-impl ClientRequest {
-    pub fn id(&self) -> u128 {
+impl<S> ClientRequest<S>
+where
+    S: Shared,
+{
+    pub fn id(&self) -> Uuid {
         match self {
             // dequeue
-            ClientRequest::CreateQueue(packet) => packet.header().uuid(),
-            ClientRequest::DeleteQueue(packet) => packet.header().uuid(),
-            ClientRequest::Enqueue(packet) => packet.header().uuid(),
-            ClientRequest::Dequeue(packet) => packet.header().uuid(),
-            ClientRequest::Peek(packet) => packet.header().uuid(),
-            ClientRequest::Len(packet) => packet.header().uuid(),
+            ClientRequest::CreateQueue(packet) => packet.header().uuid,
+            ClientRequest::DeleteQueue(packet) => packet.header().uuid,
+            ClientRequest::Enqueue(packet) => packet.header().uuid,
+            ClientRequest::Dequeue(packet) => packet.header().uuid,
+            ClientRequest::Peek(packet) => packet.header().uuid,
+            ClientRequest::Len(packet) => packet.header().uuid,
 
             // kv store
-            ClientRequest::Put(packet) => packet.header().uuid(),
-            ClientRequest::Get(packet) => packet.header().uuid(),
-            ClientRequest::Delete(packet) => packet.header().uuid(),
+            ClientRequest::Put(packet) => packet.header().uuid,
+            ClientRequest::Get(packet) => packet.header().uuid,
+            ClientRequest::Delete(packet) => packet.header().uuid,
 
             // transfer
             #[cfg(feature = "backend")]
-            ClientRequest::Transfer(packet) => packet.header().uuid(),
+            ClientRequest::Transfer(packet) => packet.header().uuid,
         }
     }
 
@@ -155,7 +170,7 @@ impl ClientRequest {
         }
     }
 
-    pub fn nack(self, response_code: u8) -> Packet {
+    pub fn nack(self, response_code: u8) -> Packet<S> {
         match self {
             // dequeue
             ClientRequest::CreateQueue(packet) => {
@@ -181,9 +196,10 @@ impl ClientRequest {
     }
 }
 
-impl<W> Encode<W> for ClientRequest
+impl<W, S> Encode<W> for ClientRequest<S>
 where
     W: Write,
+    S: Shared,
 {
     fn encode(&self, writer: &mut W) -> Result<(), necronomicon::Error> {
         match self {
@@ -207,9 +223,10 @@ where
     }
 }
 
-impl<W> Encode<W> for System
+impl<W, S> Encode<W> for System<S>
 where
     W: Write,
+    S: Shared,
 {
     fn encode(&self, writer: &mut W) -> Result<(), necronomicon::Error> {
         match self {
@@ -228,28 +245,33 @@ where
     }
 }
 
-impl<R> Decode<R> for System
+impl<R, O> DecodeOwned<R, O> for System<O::Shared>
 where
     R: Read,
+    O: Owned,
 {
-    fn decode(reader: &mut R) -> Result<Self, necronomicon::Error>
+    fn decode_owned(reader: &mut R, buffer: &mut O) -> Result<Self, necronomicon::Error>
     where
         Self: Sized,
     {
         let header = Header::decode(reader)?;
 
-        match header.kind() {
-            Kind::Join => Ok(System::Join(Join::decode(header, reader)?)),
-            Kind::JoinAck => Ok(System::JoinAck(JoinAck::decode(header, reader)?)),
+        match header.kind {
+            Kind::Join => Ok(System::Join(Join::decode(header, reader, buffer)?)),
+            Kind::JoinAck => Ok(System::JoinAck(JoinAck::decode(header, reader, buffer)?)),
 
-            Kind::Ping => Ok(System::Ping(Ping::decode(header, reader)?)),
-            Kind::PingAck => Ok(System::PingAck(PingAck::decode(header, reader)?)),
+            Kind::Ping => Ok(System::Ping(Ping::decode(header, reader, buffer)?)),
+            Kind::PingAck => Ok(System::PingAck(PingAck::decode(header, reader, buffer)?)),
 
-            Kind::Report => Ok(System::Report(Report::decode(header, reader)?)),
-            Kind::ReportAck => Ok(System::ReportAck(ReportAck::decode(header, reader)?)),
+            Kind::Report => Ok(System::Report(Report::decode(header, reader, buffer)?)),
+            Kind::ReportAck => Ok(System::ReportAck(ReportAck::decode(
+                header, reader, buffer,
+            )?)),
 
-            Kind::Transfer => Ok(System::Transfer(Transfer::decode(header, reader)?)),
-            Kind::TransferAck => Ok(System::TransferAck(TransferAck::decode(header, reader)?)),
+            Kind::Transfer => Ok(System::Transfer(Transfer::decode(header, reader, buffer)?)),
+            Kind::TransferAck => Ok(System::TransferAck(TransferAck::decode(
+                header, reader, buffer,
+            )?)),
 
             _ => panic!("invalid packet type {header:?}"),
         }
@@ -257,18 +279,21 @@ where
 }
 
 #[derive(Debug)]
-pub enum ClientResponse {
+pub enum ClientResponse<S>
+where
+    S: Shared,
+{
     // dequeue
     CreateQueue(CreateAck),
     DeleteQueue(dequeue_codec::DeleteAck),
     Enqueue(EnqueueAck),
-    Dequeue(DequeueAck),
-    Peek(PeekAck),
+    Dequeue(DequeueAck<S>),
+    Peek(PeekAck<S>),
     Len(LenAck),
 
     // kv store
     Put(PutAck),
-    Get(GetAck),
+    Get(GetAck<S>),
     Delete(kv_store_codec::DeleteAck),
 
     // transfer
@@ -276,7 +301,10 @@ pub enum ClientResponse {
     Transfer(TransferAck),
 }
 
-impl Ack for ClientResponse {
+impl<S> Ack for ClientResponse<S>
+where
+    S: Shared,
+{
     fn header(&self) -> &Header {
         match self {
             // dequeue
@@ -320,9 +348,10 @@ impl Ack for ClientResponse {
     }
 }
 
-impl<W> Encode<W> for ClientResponse
+impl<W, S> Encode<W> for ClientResponse<S>
 where
     W: Write,
+    S: Shared,
 {
     fn encode(&self, writer: &mut W) -> Result<(), necronomicon::Error> {
         match self {
@@ -347,20 +376,26 @@ where
 }
 
 #[derive(Debug)]
-pub struct ProcessRequest {
-    pub request: ClientRequest,
-    response_tx: Sender<ClientResponse>,
+pub struct ProcessRequest<S>
+where
+    S: Shared,
+{
+    pub request: ClientRequest<S>,
+    response_tx: Sender<ClientResponse<S>>,
 }
 
-impl ProcessRequest {
-    pub fn new(request: ClientRequest, response_tx: Sender<ClientResponse>) -> Self {
+impl<S> ProcessRequest<S>
+where
+    S: Shared,
+{
+    pub fn new(request: ClientRequest<S>, response_tx: Sender<ClientResponse<S>>) -> Self {
         Self {
             request,
             response_tx,
         }
     }
 
-    pub fn into_parts(self) -> (ClientRequest, PendingRequest) {
+    pub fn into_parts(self) -> (ClientRequest<S>, PendingRequest<S>) {
         (
             self.request,
             PendingRequest {
@@ -370,19 +405,28 @@ impl ProcessRequest {
     }
 }
 
-pub struct PendingRequest {
-    response_tx: Sender<ClientResponse>,
+pub struct PendingRequest<S>
+where
+    S: Shared,
+{
+    response_tx: Sender<ClientResponse<S>>,
 }
 
-impl PendingRequest {
-    pub fn complete(self, response: ClientResponse) {
+impl<S> PendingRequest<S>
+where
+    S: Shared,
+{
+    pub fn complete(self, response: ClientResponse<S>) {
         trace!("sending response: {:?}", response);
         self.response_tx.send(response).expect("send");
     }
 }
 
-impl From<Packet> for ClientRequest {
-    fn from(value: Packet) -> Self {
+impl<S> From<Packet<S>> for ClientRequest<S>
+where
+    S: Shared,
+{
+    fn from(value: Packet<S>) -> Self {
         match value {
             // dequeue
             Packet::Enqueue(enqueue) => ClientRequest::Enqueue(enqueue),
@@ -402,8 +446,11 @@ impl From<Packet> for ClientRequest {
     }
 }
 
-impl From<Packet> for ClientResponse {
-    fn from(value: Packet) -> Self {
+impl<S> From<Packet<S>> for ClientResponse<S>
+where
+    S: Shared,
+{
+    fn from(value: Packet<S>) -> Self {
         match value {
             // dequeue
             Packet::EnqueueAck(ack) => ClientResponse::Enqueue(ack),

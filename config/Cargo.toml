@@ -8,6 +8,8 @@ version = "0.1.0"
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 
+phylactery = { git = "https://github.com/nyanzoo/phylactery", branch = "develop" }
+
 [dev-dependencies]
 matches = "0.1"
 tempfile = "3.8"

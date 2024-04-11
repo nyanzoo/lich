@@ -1,3 +1,5 @@
+use phylactery::kv_store;
+
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct EndpointConfig {
     pub port: u16,
@@ -9,23 +11,12 @@ pub struct EndpointConfig {
 pub struct BackendConfig {
     pub endpoints: EndpointConfig,
 
-    pub store: StoreConfig,
+    pub store: kv_store::config::Config,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct FrontendConfig {
     pub endpoints: EndpointConfig,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
-pub struct StoreConfig {
-    pub path: String,
-
-    pub meta_size: u64,
-
-    pub node_size: u64,
-
-    pub version: u8,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
@@ -36,7 +27,9 @@ pub struct OperatorConfig {
 #[cfg(test)]
 pub mod test {
 
-    use super::{BackendConfig, EndpointConfig, OperatorConfig, StoreConfig};
+    use phylactery::kv_store;
+
+    use super::{BackendConfig, EndpointConfig, OperatorConfig};
 
     #[test]
     fn test_backend_config() {
@@ -48,9 +41,14 @@ pub mod test {
 
             [store]
             path = './lich/'
-            meta_size = 1024
+            version = 'V1'
+
+            [store.meta]
+            max_disk_usage = 1024
+            max_key_size = 128
+
+            [store.data]
             node_size = 1024
-            version = 1
         ",
         )
         .expect("valid config");
@@ -61,11 +59,14 @@ pub mod test {
                     port: 10001,
                     operator_addr: "localhost:10000".to_string()
                 },
-                store: StoreConfig {
-                    path: "./lich/".to_string(),
-                    meta_size: 1024,
-                    node_size: 1024,
-                    version: 1,
+                store: kv_store::config::Config {
+                    path: "./lich/".to_owned(),
+                    meta: kv_store::config::Metadata {
+                        max_key_size: 128,
+                        max_disk_usage: 1024,
+                    },
+                    data: kv_store::config::Data { node_size: 1024 },
+                    version: phylactery::entry::Version::V1,
                 }
             }
         );

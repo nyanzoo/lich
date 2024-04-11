@@ -13,13 +13,17 @@ thiserror = "1.0"
 
 net = { path = "../net" }
 requests = { path = "../requests", features = ["backend"] }
-necronomicon = { git = "https://github.com/nyanzoo/necronomicon", branch = "master" }
+
+necronomicon = { git = "https://github.com/nyanzoo/necronomicon", branch = "develop" }
 # necronomicon = { path = "../necronomicon" }
 phylactery = { git = "https://github.com/nyanzoo/phylactery", branch = "develop" }
 # phylactery = { path = "../phylactery" }
 
-
 [dev-dependencies]
-net = { path = "../net", features = ["tests"] }
 lazy_static = "1.4"
 matches = "0.1"
+net = { path = "../net", features = ["test"] }
+
+necronomicon = { git = "https://github.com/nyanzoo/necronomicon", branch = "develop", features = [
+    "test",
+] }

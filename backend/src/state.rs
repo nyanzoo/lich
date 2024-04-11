@@ -15,7 +15,7 @@ use io::outgoing::Outgoing;
 use necronomicon::{
     full_decode,
     system_codec::{Join, Position, Role},
-    Ack, Encode, Packet,
+    Ack, Encode, Packet, Shared, SharedImpl,
 };
 use net::stream::{RetryConsistent, TcpStream};
 use requests::{ClientRequest, ClientResponse, PendingRequest, ProcessRequest, System};
@@ -31,14 +31,14 @@ pub trait State {
 pub struct Init {
     endpoint_config: EndpointConfig,
     store: Store<String>,
-    requests_rx: Receiver<ProcessRequest>,
+    requests_rx: Receiver<ProcessRequest<SharedImpl>>,
 }
 
 impl Init {
     pub fn init(
         endpoint_config: EndpointConfig,
         store: Store<String>,
-        requests_rx: Receiver<ProcessRequest>,
+        requests_rx: Receiver<ProcessRequest<SharedImpl>>,
     ) -> Box<dyn State> {
         Box::new(Self {
             endpoint_config,
@@ -79,7 +79,7 @@ pub struct WaitingForOperator {
 
     operator: OperatorConnection,
 
-    requests_rx: Receiver<ProcessRequest>,
+    requests_rx: Receiver<ProcessRequest<SharedImpl>>,
 }
 
 impl State for WaitingForOperator {
@@ -153,17 +153,17 @@ impl State for WaitingForOperator {
 }
 
 pub struct Ready {
-    position: Position,
+    position: Position<SharedImpl>,
 
     store: Store<String>,
-    not_ready: Vec<ProcessRequest>,
-    pending: HashMap<u128, PendingRequest>,
+    not_ready: Vec<ProcessRequest<SharedImpl>>,
+    pending: HashMap<u128, PendingRequest<SharedImpl>>,
 
     operator: OperatorConnection,
 
-    ack_rx: Option<Receiver<ClientResponse>>,
-    requests_rx: Receiver<ProcessRequest>,
-    outgoing_tx: Sender<Packet>,
+    ack_rx: Option<Receiver<ClientResponse<SharedImpl>>>,
+    requests_rx: Receiver<ProcessRequest<SharedImpl>>,
+    outgoing_tx: Sender<Packet<SharedImpl>>,
 
     outgoing: Option<Outgoing>,
 }
@@ -335,17 +335,17 @@ impl State for Ready {
 }
 
 pub struct Update {
-    last_position: Position,
-    new_position: Position,
+    last_position: Position<SharedImpl>,
+    new_position: Position<SharedImpl>,
 
     store: Store<String>,
-    pending: HashMap<u128, PendingRequest>,
+    pending: HashMap<u128, PendingRequest<SharedImpl>>,
 
     operator: OperatorConnection,
 
-    ack_rx: Option<Receiver<ClientResponse>>,
-    requests_rx: Receiver<ProcessRequest>,
-    outgoing_tx: Sender<Packet>,
+    ack_rx: Option<Receiver<ClientResponse<SharedImpl>>>,
+    requests_rx: Receiver<ProcessRequest<SharedImpl>>,
+    outgoing_tx: Sender<Packet<SharedImpl>>,
 
     outgoing: Option<Outgoing>,
 }
@@ -450,9 +450,9 @@ pub struct Transfer {
 
     operator: OperatorConnection,
 
-    ack_rx: Option<Receiver<ClientResponse>>,
-    requests_rx: Receiver<ProcessRequest>,
-    outgoing_tx: Sender<Packet>,
+    ack_rx: Option<Receiver<ClientResponse<SharedImpl>>>,
+    requests_rx: Receiver<ProcessRequest<SharedImpl>>,
+    outgoing_tx: Sender<Packet<SharedImpl>>,
 
     outgoing: Option<Outgoing>,
 }
@@ -509,8 +509,8 @@ pub struct OperatorConnection {
     _read: JoinHandle<()>,
     _write: JoinHandle<()>,
     kill_tx: Sender<()>,
-    operator_tx: Sender<System>,
-    operator_rx: Receiver<System>,
+    operator_tx: Sender<System<SharedImpl>>,
+    operator_rx: Receiver<System<SharedImpl>>,
 }
 
 impl Drop for OperatorConnection {
@@ -596,7 +596,8 @@ impl OperatorConnection {
             // But we need a way to identify each node.
             // We can use a uuid for this.
             let join = Join::new(
-                (1, Uuid::new_v4().as_u128()),
+                1,
+                Uuid::new_v4().as_u128(),
                 Role::Backend(format!("{}:{}", fqdn, our_port)),
                 version,
                 false,
@@ -640,11 +641,11 @@ impl OperatorConnection {
         }
     }
 
-    fn tx(&self) -> Sender<System> {
+    fn tx(&self) -> Sender<System<SharedImpl>> {
         self.operator_tx.clone()
     }
 
-    fn rx(&self) -> Receiver<System> {
+    fn rx(&self) -> Receiver<System<SharedImpl>> {
         self.operator_rx.clone()
     }
 }

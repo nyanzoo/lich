@@ -8,24 +8,26 @@ use crossbeam::channel::{bounded, Receiver, Sender};
 use log::{debug, error, info, trace, warn};
 use rayon::{ThreadPool, ThreadPoolBuilder};
 
+use necronomicon::{Encode, PoolImpl, SharedImpl};
 use net::{
     session::{Session, SessionReader, SessionWriter},
     stream::TcpListener,
 };
 use requests::{ClientRequest, ClientResponse, ProcessRequest};
-use necronomicon::{full_decode, Encode};
+
+use crate::decode_packet_on_reader_and;
 
 /// # Description
 /// This is for accepting incoming requests.
 pub struct Incoming {
     listener: TcpListener,
     // NOTE: later maybe replace with dequeue? It might be slower but it will allow for recovery of even unprocessed msgs.
-    requests_tx: Sender<ProcessRequest>,
+    requests_tx: Sender<ProcessRequest<SharedImpl>>,
     pool: ThreadPool,
 }
 
 impl Incoming {
-    pub fn new(port: u16, requests_tx: Sender<ProcessRequest>) -> Self {
+    pub fn new(port: u16, requests_tx: Sender<ProcessRequest<SharedImpl>>) -> Self {
         info!("starting listening for incoming requests on port {}", port);
         let listener = TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port))
             .expect("listener");
@@ -41,7 +43,7 @@ impl Incoming {
     }
 
     // TODO: we need to have a request type that maps to clients, that way we can send the acks back to the correct client without having to send response back to `Incoming`.
-    pub fn run(self) {
+    pub fn run(self, buffer_pool_maker: impl Fn() -> PoolImpl) {
         info!("starting listening for incoming requests");
         let Self {
             listener,
@@ -67,10 +69,11 @@ impl Incoming {
                     info!("new session {:?}", session);
                     let (read, write) = session.split();
                     let ack_writer = write.clone();
+                    let buffer_pool = buffer_pool_maker();
                     // I think the acks need to be oneshots that are per
                     pool.spawn(|| {
                         debug!("spawned thread for requests on session {:?}", read);
-                        handle_requests(read, write, requests_tx, ack_tx);
+                        handle_requests(read, write, requests_tx, ack_tx, buffer_pool);
                     });
                     pool.spawn(|| {
                         debug!("spawned thread for acks for session {:?}", ack_writer);
@@ -83,7 +86,7 @@ impl Incoming {
     }
 }
 
-fn handle_acks(mut session: SessionWriter, ack_rx: Receiver<ClientResponse>) {
+fn handle_acks(mut session: SessionWriter, ack_rx: Receiver<ClientResponse<SharedImpl>>) {
     loop {
         if let Ok(ack) = ack_rx.recv() {
             trace!("got ack {:?}", ack);
@@ -115,38 +118,30 @@ fn handle_acks(mut session: SessionWriter, ack_rx: Receiver<ClientResponse>) {
 fn handle_requests(
     mut reader: SessionReader,
     mut writer: SessionWriter,
-    requests_tx: Sender<ProcessRequest>,
-    ack_tx: Sender<ClientResponse>,
+    requests_tx: Sender<ProcessRequest<SharedImpl>>,
+    ack_tx: Sender<ClientResponse<SharedImpl>>,
+    pool: PoolImpl,
 ) {
-    loop {
-        match full_decode(&mut reader) {
-            Ok(packet) => {
-                reader.update_last_seen();
-                trace!("got {:?} packet", packet);
-                let request = ClientRequest::from(packet.clone());
-                let request = ProcessRequest::new(request, ack_tx.clone());
+    decode_packet_on_reader_and(&mut reader, &pool, move |packet| {
+        let request = ClientRequest::from(packet.clone());
+        let request = ProcessRequest::new(request, ack_tx.clone());
 
-                // TODO: fill buf
-                // TODO: need to update interface of these to take a `Reader` to allow direct reads into the buffer
-                // without having to copy the data.
-                match requests_tx.send(request) {
-                    Ok(_) => {
-                        trace!("pushed {:?} packet", packet);
-                    }
-                    Err(err) => {
-                        warn!("requests_tx.send: {}", err);
-                        if let Some(nack) = packet.nack(necronomicon::SERVER_BUSY) {
-                            nack.encode(&mut writer).expect("encode");
-                            writer.flush().expect("flush");
-                        }
-                        break;
-                    }
-                }
+        // TODO: fill buf
+        // TODO: need to update interface of these to take a `Reader` to allow direct reads into the buffer
+        // without having to copy the data.
+        match requests_tx.send(request) {
+            Ok(_) => {
+                trace!("pushed {:?} packet", packet);
+                true
             }
             Err(err) => {
-                trace!("closing session due to err: {err}");
-                break;
+                warn!("requests_tx.send: {}", err);
+                if let Some(nack) = packet.nack(necronomicon::SERVER_BUSY) {
+                    nack.encode(&mut writer).expect("encode");
+                    writer.flush().expect("flush");
+                }
+                false
             }
         }
-    }
+    });
 }

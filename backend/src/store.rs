@@ -2,6 +2,7 @@ use std::{
     collections::BTreeMap,
     fs::{create_dir_all, read, remove_dir},
     io::Cursor,
+    mem::size_of,
     path::PathBuf,
 };
 
@@ -10,15 +11,15 @@ use log::{trace, warn};
 
 use config::StoreConfig;
 use necronomicon::{
-    kv_store_codec::Key, system_codec::Transfer, Decode, Encode, Packet,
-    FAILED_TO_PUSH_TO_TRANSACTION_LOG, INTERNAL_ERROR, KEY_DOES_NOT_EXIST, QUEUE_ALREADY_EXISTS,
-    QUEUE_DOES_NOT_EXIST,
+    system_codec::Transfer, BinaryData, ByteStr, Decode, Encode, Owned, OwnedImpl, Packet, Shared,
+    SharedImpl, FAILED_TO_PUSH_TO_TRANSACTION_LOG, INTERNAL_ERROR, KEY_DOES_NOT_EXIST,
+    QUEUE_ALREADY_EXISTS, QUEUE_DOES_NOT_EXIST,
 };
 use phylactery::{
     buffer::MmapBuffer,
     dequeue::Dequeue,
     entry::Version,
-    kv_store::{Graveyard, KVStore, Lookup},
+    kv_store::{Graveyard, Lookup, Store as KVStore},
     ring_buffer::{self, ring_buffer},
 };
 use requests::ClientRequest;
@@ -28,8 +29,8 @@ use crate::error::Error;
 
 #[derive(Clone, Debug)]
 enum CommitStatus {
-    Committed(ClientRequest),
-    Pending(ClientRequest),
+    Committed(ClientRequest<SharedImpl>),
+    Pending(ClientRequest<SharedImpl>),
 }
 
 impl CommitStatus {
@@ -46,21 +47,18 @@ impl CommitStatus {
 // We could keep things in memory and then write to disk on ack. Which is probably the best option.
 // We also need to write some extra data to disk for the transaction log.
 
-pub struct Store<S>
-where
-    S: AsRef<str>,
-{
-    kvs: KVStore<S>,
+pub struct Store {
+    kvs: KVStore<SharedImpl>,
     root: String,
     api_version: Version,
     store_version: u128,
-    dequeues: BTreeMap<S, Dequeue<S>>,
+    dequeues: BTreeMap<ByteStr<SharedImpl>, Dequeue>,
     pending: hashlink::LinkedHashMap<u128, CommitStatus>,
     transaction_log_tx: ring_buffer::Pusher<MmapBuffer>,
     transaction_log_rx: ring_buffer::Popper<MmapBuffer>,
 }
 
-impl Store<String> {
+impl Store {
     /// # Description
     /// Create a new store. There should be only one store per node.
     /// Users are allowed to have a single KV Store and multiple Dequeues.
@@ -108,6 +106,7 @@ impl Store<String> {
         let mut kvs = KVStore::new(
             meta_path,
             config.meta_size,
+            config.max_key_size.into(),
             data_path,
             config.node_size,
             api_version,
@@ -150,21 +149,28 @@ impl Store<String> {
         self.store_version
     }
 
-    fn update_version(&mut self) -> Result<(), Error> {
+    fn update_version(&mut self, buffer: &mut OwnedImpl) -> Result<(), Error> {
         self.store_version += 1;
-        let mut buf = vec![];
-        self.store_version.encode(&mut buf).expect("encode version");
-        self.kvs
-            .insert(Key::try_from("version").expect("store version"), &buf)?;
+        let version = self.version_key(buffer)?;
+        let store_version = self.version_value(buffer)?;
+        self.kvs.insert(
+            BinaryData::new(version),
+            BinaryData::new(store_version),
+            buffer,
+        )?;
         Ok(())
     }
 
-    pub(crate) fn add_to_pending(&mut self, patch: ClientRequest) {
+    pub(crate) fn add_to_pending(&mut self, patch: ClientRequest<SharedImpl>) {
         self.pending
             .insert(patch.id(), CommitStatus::Pending(patch));
     }
 
-    pub(crate) fn commit_pending(&mut self, id: u128, buf: &mut Vec<u8>) -> Vec<Packet> {
+    pub(crate) fn commit_pending(
+        &mut self,
+        id: u128,
+        buf: &mut Vec<u8>,
+    ) -> Vec<Packet<SharedImpl>> {
         if let Some(commit) = self.pending.get_mut(&id) {
             commit.complete();
         }
@@ -182,7 +188,11 @@ impl Store<String> {
         packets
     }
 
-    pub(crate) fn commit_patch(&mut self, patch: ClientRequest, buf: &mut Vec<u8>) -> Packet {
+    pub(crate) fn commit_patch(
+        &mut self,
+        patch: ClientRequest<SharedImpl>,
+        buffer: &mut OwnedImpl,
+    ) -> Packet<SharedImpl> {
         let mut tl_patch = vec![];
 
         // TODO: make `push_encode`
@@ -217,7 +227,7 @@ impl Store<String> {
                             self.dequeues.insert(path.to_owned(), dequeue);
                             trace!("created queue {:?}", path);
 
-                            if let Err(err) = self.update_version() {
+                            if let Err(err) = self.update_version(buffer) {
                                 warn!("failed to update version: {err:?}");
                                 queue.nack(INTERNAL_ERROR)
                             } else {
@@ -237,7 +247,7 @@ impl Store<String> {
                     remove_dir(format!("{}/{}", self.root, path)).expect("must be able to remove");
                     trace!("deleted queue {:?}", path);
 
-                    if let Err(err) = self.update_version() {
+                    if let Err(err) = self.update_version(buffer) {
                         warn!("failed to update version: {err:?}");
                         queue.nack(INTERNAL_ERROR)
                     } else {
@@ -257,7 +267,7 @@ impl Store<String> {
                     let push = queue.push(enqueue.value()).expect("queue full");
                     trace!("pushed to queue({}): {:?}", path, push);
 
-                    if let Err(err) = self.update_version() {
+                    if let Err(err) = self.update_version(buffer) {
                         warn!("failed to update version: {err:?}");
                         enqueue.nack(INTERNAL_ERROR)
                     } else {
@@ -274,14 +284,14 @@ impl Store<String> {
             ClientRequest::Dequeue(dequeue) => {
                 let path = dequeue.path();
                 let ack = if let Some(queue) = self.dequeues.get_mut(path) {
-                    let pop = queue.pop(buf).expect("queue empty");
+                    let pop = queue.pop(buffer).expect("queue empty");
                     trace!("popped from queue({}): {:?}", path, pop);
 
-                    if let Err(err) = self.update_version() {
+                    if let Err(err) = self.update_version(buffer) {
                         warn!("failed to update version: {err:?}");
                         dequeue.nack(INTERNAL_ERROR)
                     } else {
-                        dequeue.ack(buf.to_vec())
+                        dequeue.ack(buffer.to_vec())
                     }
                 } else {
                     warn!("queue({}) does not exist", path);
@@ -292,10 +302,10 @@ impl Store<String> {
             }
 
             // kv store
-            ClientRequest::Put(put) => match self.kvs.insert(*put.key(), put.value()) {
+            ClientRequest::Put(put) => match self.kvs.insert(*put.key(), put.value(), buffer) {
                 Ok(_) => {
                     self.store_version += 1;
-                    let ack = if let Err(err) = self.update_version() {
+                    let ack = if let Err(err) = self.update_version(buffer) {
                         warn!("failed to update version: {err:?}");
                         put.nack(INTERNAL_ERROR)
                     } else {
@@ -309,10 +319,10 @@ impl Store<String> {
                     Packet::PutAck(put.nack(INTERNAL_ERROR))
                 }
             },
-            ClientRequest::Delete(delete) => match self.kvs.delete(delete.key()) {
+            ClientRequest::Delete(delete) => match self.kvs.delete(delete.key(), buffer) {
                 Ok(_) => {
                     self.store_version += 1;
-                    let ack = if let Err(err) = self.update_version() {
+                    let ack = if let Err(err) = self.update_version(buffer) {
                         warn!("failed to update version: {err:?}");
                         delete.nack(INTERNAL_ERROR)
                     } else {
@@ -328,7 +338,7 @@ impl Store<String> {
             },
             ClientRequest::Get(get) => {
                 // NOTE: no need to update version as store did not change.
-                let ack = match self.kvs.get(get.key(), buf) {
+                let ack = match self.kvs.get(get.key(), buffer) {
                     Ok(lookup) => match lookup {
                         Lookup::Absent => get.nack(KEY_DOES_NOT_EXIST),
                         Lookup::Found(found) => get.ack(found.into_inner()),
@@ -349,16 +359,56 @@ impl Store<String> {
         res
     }
 
-    pub(crate) fn deconstruct_iter(&self) -> impl Iterator<Item = Transfer> + '_ {
+    pub(crate) fn deconstruct_iter(&self) -> impl Iterator<Item = Transfer<SharedImpl>> + '_ {
         self.kvs.deconstruct_iter().map(|path| {
-            let content = read(&path).expect("must be able to read file");
+            let content =
+                read(&path.as_str().expect("valid utf8 str")).expect("must be able to read file");
             let uuid = uuid::Uuid::new_v4().as_u128();
-            Transfer::new((self.api_version.into(), uuid), path, content)
+            Transfer::new(self.api_version, uuid, path, content)
         })
     }
 
-    pub(crate) fn reconstruct(&self, transfer: &Transfer) {
+    pub(crate) fn reconstruct(&self, transfer: &Transfer<SharedImpl>) {
         self.kvs.reconstruct(transfer.path(), transfer.content())
+    }
+
+    fn version_key(&mut self, buffer: &mut OwnedImpl) -> Result<SharedImpl, Error> {
+        const VERSION: &str = "version";
+        if buffer.unfilled_capacity() < VERSION.len() + size_of::<usize>() {
+            Err(Error::Necronomicon(necronomicon::Error::OwnedRemaining {
+                acquire: VERSION.len(),
+                capacity: buffer.unfilled_capacity(),
+            }))
+        } else {
+            let mut unfilled = buffer.unfilled();
+
+            VERSION.len().encode(unfilled)?;
+            buffer.fill(size_of::<usize>());
+
+            let version = VERSION.as_bytes();
+            version.encode(unfilled)?;
+            buffer.fill(version.len());
+
+            let buffer = buffer.split_at(version.len() + size_of::<usize>());
+            Ok(buffer.into_shared())
+        }
+    }
+
+    fn version_value(&self, buffer: &mut OwnedImpl) -> Result<SharedImpl, Error> {
+        if buffer.unfilled_capacity() < size_of::<u128>() {
+            Err(Error::Necronomicon(necronomicon::Error::OwnedRemaining {
+                acquire: size_of::<u128>(),
+                capacity: buffer.unfilled_capacity(),
+            }))
+        } else {
+            let mut unfilled = buffer.unfilled();
+            self.store_version
+                .encode(&mut unfilled)
+                .expect("encode version");
+            buffer.fill(size_of::<u128>());
+            let buffer = buffer.split_at(size_of::<u128>());
+            Ok(buffer.into_shared())
+        }
     }
 }
 
@@ -391,6 +441,7 @@ mod tests {
         let config = StoreConfig {
             path: path.clone(),
             meta_size: 1024,
+            max_key_size: 128,
             node_size: 1024,
             version: 1,
         };

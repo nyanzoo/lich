@@ -9,7 +9,7 @@ use std::{
     time::Duration,
 };
 
-use necronomicon::{Encode, Packet};
+use necronomicon::{Encode, Packet, Shared};
 use parking_lot::Mutex;
 
 lazy_static::lazy_static! {
@@ -143,7 +143,10 @@ impl TcpStreamInner {
         reads.encode(&mut self.read).expect("encode");
     }
 
-    fn verify_writes(&mut self, expected: &[Packet]) {
+    fn verify_writes<S>(&mut self, expected: &[Packet<S>])
+    where
+        S: Shared,
+    {
         let mut expected_v = Vec::new();
         for packet in expected {
             packet.encode(&mut expected_v).expect("encode");
@@ -220,7 +223,10 @@ impl TcpStream {
         self.inner.lock().fill_read(reads);
     }
 
-    pub fn verify_writes(&self, expected: &[Packet]) {
+    pub fn verify_writes<S>(&self, expected: &[Packet<S>])
+    where
+        S: Shared,
+    {
         self.inner.lock().verify_writes(expected);
     }
 
