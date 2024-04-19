@@ -82,37 +82,53 @@ impl Outgoing {
         info!("starting outgoing to {addr}");
         let (mut read, mut write) = (BufReader::new(stream.clone()), stream.clone());
 
+        let (kill_tx, kill_rx) = crossbeam::channel::unbounded();
         let read_handle = std::thread::spawn({
             let addr = addr.clone();
-            move || loop {
-                match requests_rx.recv() {
-                    Ok(packet) => {
-                        trace!("sending packet {:?} to {addr}", packet);
+            move || {
+                loop {
+                    match requests_rx.recv() {
+                        Ok(packet) => {
+                            trace!("sending packet {:?} to {addr}", packet);
 
-                        if let Err(err) = packet.encode(&mut write) {
-                            trace!(
+                            if let Err(err) = packet.encode(&mut write) {
+                                trace!(
                                 "failed to encode packet {packet:?} due to {err}, flushing write"
                             );
-                            break;
-                        }
+                                break;
+                            }
 
-                        trace!("flushing write");
-                        if let Err(err) = write.flush() {
-                            trace!("failed to flush write due to {err}");
+                            trace!("flushing write");
+                            if let Err(err) = write.flush() {
+                                trace!("failed to flush write due to {err}");
+                                break;
+                            }
+                        }
+                        Err(err) => {
+                            trace!("requests_rx.recv: closed due to {err}");
                             break;
                         }
-                    }
-                    Err(err) => {
-                        trace!("requests_rx.recv: closed due to {err}");
-                        break;
                     }
                 }
+                kill_tx.send(()).expect("kill_tx.send");
             }
         });
 
         let write_handle = std::thread::spawn({
             let addr = addr.clone();
             move || loop {
+                match kill_rx.try_recv() {
+                    Ok(_) => {
+                        trace!("kill_rx.try_recv: received kill signal");
+                        break;
+                    }
+                    Err(crossbeam::channel::TryRecvError::Empty) => {}
+                    Err(crossbeam::channel::TryRecvError::Disconnected) => {
+                        trace!("kill_rx.try_recv: closed");
+                        break;
+                    }
+                }
+
                 let mut previous_decoded_header = None;
                 'pool: loop {
                     let mut buffer = pool.acquire().expect("pool.acquire");

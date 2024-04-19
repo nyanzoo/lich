@@ -4,7 +4,7 @@ use clap::Parser;
 use necronomicon::{
     full_decode,
     kv_store_codec::{Get, Put},
-    Ack, Encode, Packet,
+    Ack, BinaryData, ByteStr, Encode, Packet, Pool, PoolImpl,
 };
 use rand::Rng;
 use uuid::Uuid;
@@ -51,6 +51,7 @@ enum Scenario {
 }
 
 fn run(host: String, port: u16, scenario: Scenario) {
+    let pool = PoolImpl::new(1024, 1024);
     let start = Instant::now();
     match scenario {
         Scenario::PutOnly {
@@ -63,11 +64,15 @@ fn run(host: String, port: u16, scenario: Scenario) {
             let time_to_send = Instant::now();
             for i in 0..count {
                 let key = key_set[i % key_set.len()].clone();
+                let mut owned = pool.acquire().expect("pool.acquire");
+                let key = ByteStr::from_owned(key, &mut owned).expect("key");
                 // generate random value
                 let value = generate_random_bytes(value_size);
+                let mut owned = pool.acquire().expect("pool.acquire");
+                let value = BinaryData::from_owned(value, &mut owned).expect("value");
                 let uuid = Uuid::new_v4().as_u128();
-                packet_tracker.insert(uuid);
-                let packet = Put::new((1, uuid), key.try_into().unwrap(), value);
+                packet_tracker.insert(necronomicon::Uuid::from(uuid));
+                let packet = Put::new(1, uuid, key.inner().clone(), value);
                 packet.encode(&mut stream).unwrap();
             }
             stream.flush().unwrap();
@@ -75,11 +80,12 @@ fn run(host: String, port: u16, scenario: Scenario) {
 
             let time_to_receive = Instant::now();
             for _ in 0..count {
-                let response = full_decode(&mut stream).unwrap();
+                let mut buffer = pool.acquire().expect("pool.acquire");
+                let response = full_decode(&mut stream, &mut buffer, None).unwrap();
                 let Packet::PutAck(response) = response else {
                     panic!("received unexpected response: {:?}", response);
                 };
-                if !packet_tracker.remove(&response.header().uuid()) {
+                if !packet_tracker.remove(&response.header().uuid) {
                     panic!("received unexpected response: {:?}", response);
                 }
             }
@@ -98,16 +104,20 @@ fn run(host: String, port: u16, scenario: Scenario) {
             let mut rng = rand::thread_rng();
             for i in 0..count {
                 let key = key_set[i % key_set.len()].clone();
+                let mut owned = pool.acquire().expect("pool.acquire");
+                let key = ByteStr::from_owned(key, &mut owned).expect("key");
                 // generate random value
                 let uuid = Uuid::new_v4().as_u128();
-                packet_tracker.insert(uuid);
+                packet_tracker.insert(necronomicon::Uuid::from(uuid));
                 let chance = rng.gen_range(0.0..=1.0);
                 if distribution > chance {
                     let value = generate_random_bytes(value_size);
-                    let packet = Put::new((1, uuid), key.try_into().unwrap(), value);
+                    let mut owned = pool.acquire().expect("pool.acquire");
+                    let value = BinaryData::from_owned(value, &mut owned).expect("value");
+                    let packet = Put::new(1, uuid, key.inner().clone(), value);
                     packet.encode(&mut stream).unwrap();
                 } else {
-                    let packet = Get::new((1, uuid), key.try_into().unwrap());
+                    let packet = Get::new(1, uuid, key.inner().clone());
                     packet.encode(&mut stream).unwrap();
                 }
             }
@@ -115,16 +125,19 @@ fn run(host: String, port: u16, scenario: Scenario) {
             println!("time to send: {:?}", time_to_send.elapsed());
 
             let time_to_receive = Instant::now();
-            for _ in 0..count {
-                let response = full_decode(&mut stream).unwrap();
+            for i in 0..count {
+                println!("acquire");
+                let mut buffer = pool.acquire().expect("pool.acquire");
+                println!("i: {:?}", i);
+                let response = full_decode(&mut stream, &mut buffer, None).unwrap();
                 match response {
                     Packet::PutAck(response) => {
-                        if !packet_tracker.remove(&response.header().uuid()) {
+                        if !packet_tracker.remove(&response.header().uuid) {
                             panic!("received unexpected response: {:?}", response);
                         }
                     }
                     Packet::GetAck(response) => {
-                        if !packet_tracker.remove(&response.header().uuid()) {
+                        if !packet_tracker.remove(&response.header().uuid) {
                             panic!("received unexpected response: {:?}", response);
                         }
                     }

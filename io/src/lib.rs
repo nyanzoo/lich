@@ -7,7 +7,7 @@ pub mod error;
 pub mod incoming;
 pub mod outgoing;
 
-pub(crate) fn decode_packet_on_reader_and<P, F>(reader: &mut SessionReader, pool: &P, mut service: F)
+pub fn decode_packet_on_reader_and<P, F>(reader: &mut SessionReader, pool: &P, mut service: F)
 where
     P: Pool,
     F: FnMut(Packet<<P::Buffer as Owned>::Shared>) -> bool,

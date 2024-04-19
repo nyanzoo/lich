@@ -1,6 +1,12 @@
 use phylactery::kv_store;
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct PoolConfig {
+    pub block_size: usize,
+    pub capacity: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct EndpointConfig {
     pub port: u16,
 
@@ -12,11 +18,17 @@ pub struct BackendConfig {
     pub endpoints: EndpointConfig,
 
     pub store: kv_store::config::Config,
+
+    pub incoming_pool: PoolConfig,
+    pub outgoing_pool: PoolConfig,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct FrontendConfig {
     pub endpoints: EndpointConfig,
+
+    pub incoming_pool: PoolConfig,
+    pub outgoing_pool: PoolConfig,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
@@ -49,6 +61,14 @@ pub mod test {
 
             [store.data]
             node_size = 1024
+
+            [incoming_pool]
+            block_size = 1024
+            capacity = 1024
+
+            [outgoing_pool]
+            block_size = 1024
+            capacity = 1024
         ",
         )
         .expect("valid config");
@@ -67,6 +87,14 @@ pub mod test {
                     },
                     data: kv_store::config::Data { node_size: 1024 },
                     version: phylactery::entry::Version::V1,
+                },
+                incoming_pool: crate::PoolConfig {
+                    block_size: 1024,
+                    capacity: 1024
+                },
+                outgoing_pool: crate::PoolConfig {
+                    block_size: 1024,
+                    capacity: 1024
                 }
             }
         );

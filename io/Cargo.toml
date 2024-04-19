@@ -6,24 +6,21 @@ version = "0.1.0"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-crossbeam = "0.8"
-log = "0.4"
-rayon = "1.7"
-thiserror = "1.0"
+crossbeam = { workspace = true }
+log = { workspace = true }
+rayon = { workspace = true }
+thiserror = { workspace = true }
 
 net = { path = "../net" }
 requests = { path = "../requests", features = ["backend"] }
 
-necronomicon = { git = "https://github.com/nyanzoo/necronomicon", branch = "develop" }
-# necronomicon = { path = "../necronomicon" }
-phylactery = { git = "https://github.com/nyanzoo/phylactery", branch = "develop" }
-# phylactery = { path = "../phylactery" }
+necronomicon = { workspace = true }
+phylactery = { workspace = true }
 
 [dev-dependencies]
-lazy_static = "1.4"
-matches = "0.1"
+lazy_static = { workspace = true }
+matches = { workspace = true }
+
 net = { path = "../net", features = ["test"] }
 
-necronomicon = { git = "https://github.com/nyanzoo/necronomicon", branch = "develop", features = [
-    "test",
-] }
+necronomicon = { workspace = true, features = ["test"] }

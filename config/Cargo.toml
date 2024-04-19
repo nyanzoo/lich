@@ -6,13 +6,13 @@ version = "0.1.0"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-serde = { version = "1.0", features = ["derive"] }
+serde = { workspace = true, features = ["derive"] }
 
-phylactery = { git = "https://github.com/nyanzoo/phylactery", branch = "develop" }
+phylactery = { workspace = true, branch = "develop" }
 
 [dev-dependencies]
-matches = "0.1"
-tempfile = "3.8"
-toml = "0.8"
+tempfile = { workspace = true }
+matches = { workspace = true }
+toml = { workspace = true }
 
 [features]

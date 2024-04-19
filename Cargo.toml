@@ -12,3 +12,27 @@ members = [
 
     "examples/*",
 ]
+
+[workspace.dependencies]
+# 1st-party
+
+# 2nd-party
+necronomicon = { git = "https://github.com/nyanzoo/necronomicon", branch = "develop" }
+phylactery = { git = "https://github.com/nyanzoo/phylactery", branch = "develop" }
+
+# 3rd-party
+clap = "4"
+crossbeam = "0.8"
+env_logger = "0.11"
+hashlink = "0.9"
+lazy_static = "1.4"
+log = "0.4"
+matches = "0.1"
+parking_lot = "0.12"
+rand = "0.8"
+rayon = "1.7"
+serde = { version = "1.0" }
+tempfile = "3.2"
+thiserror = "1.0"
+toml = "0.8"
+uuid = "1.8"

@@ -9,7 +9,7 @@ use std::{
     time::Duration,
 };
 
-use necronomicon::{Encode, Packet, Shared};
+use necronomicon::{Encode, Packet, SharedImpl};
 use parking_lot::Mutex;
 
 lazy_static::lazy_static! {
@@ -143,10 +143,7 @@ impl TcpStreamInner {
         reads.encode(&mut self.read).expect("encode");
     }
 
-    fn verify_writes<S>(&mut self, expected: &[Packet<S>])
-    where
-        S: Shared,
-    {
+    fn verify_writes(&mut self, expected: &[Packet<SharedImpl>]) {
         let mut expected_v = Vec::new();
         for packet in expected {
             packet.encode(&mut expected_v).expect("encode");
@@ -223,10 +220,7 @@ impl TcpStream {
         self.inner.lock().fill_read(reads);
     }
 
-    pub fn verify_writes<S>(&self, expected: &[Packet<S>])
-    where
-        S: Shared,
-    {
+    pub fn verify_writes(&self, expected: &[Packet<SharedImpl>]) {
         self.inner.lock().verify_writes(expected);
     }
 
@@ -270,7 +264,7 @@ impl Write for TcpStream {
 }
 
 #[derive(Clone, Debug)]
-pub struct SocketAddr(String);
+pub struct SocketAddr;
 
 pub struct TcpListener(Rc<RefCell<Vec<TcpStream>>>);
 
@@ -282,7 +276,7 @@ impl TcpListener {
     pub fn accept(&self) -> std::io::Result<(TcpStream, SocketAddr)> {
         let addr = ACCEPTS.pop().expect("no more test connections");
         let stream = TcpStream::connect(addr.clone())?;
-        Ok((stream.clone(), SocketAddr(addr.clone())))
+        Ok((stream.clone(), SocketAddr))
     }
 
     pub fn incoming(&self) -> Incoming {

@@ -8,7 +8,6 @@ mod real;
 #[cfg(not(feature = "test"))]
 pub use real::*;
 
-
 pub trait RetryPolicy {
     fn retry(&mut self) -> bool;
 }
@@ -33,7 +32,8 @@ impl RetryPolicy for RetryConsistent {
             }
             *count -= 1;
         }
-        return true;
+
+        true
     }
 }
 
@@ -64,6 +64,7 @@ impl RetryPolicy for RetryExponential {
         }
         self.duration =
             std::time::Duration::from_secs_f64(self.duration.as_secs_f64() * self.multiplier);
-        return true;
+
+        true
     }
 }

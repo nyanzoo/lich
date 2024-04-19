@@ -1,10 +1,11 @@
 use std::thread;
 
 use crossbeam::channel::bounded;
-use log::info;
+use log::{info, trace};
 
 use config::BackendConfig;
 use io::incoming::Incoming;
+use necronomicon::PoolImpl;
 
 use crate::{state::Init, store::Store};
 
@@ -34,18 +35,29 @@ fn main() {
     let contents = std::fs::read_to_string(CONFIG).expect("read config");
     let config = toml::from_str::<BackendConfig>(&contents).expect("valid config");
 
-    let store = Store::new(&config.store).expect("store");
+    let incoming_pool = PoolImpl::new(
+        config.incoming_pool.block_size,
+        config.incoming_pool.capacity,
+    );
+    // We only need a pool temporarily for the store to initialize.
+    let store = Store::new(config.store, incoming_pool.clone()).expect("store");
 
     let (requests_tx, requests_rx) = bounded(1024);
 
+    trace!("starting incoming");
     _ = thread::Builder::new()
         .name("incoming".to_string())
         .spawn(move || {
-            Incoming::new(config.endpoints.port, requests_tx).run();
+            Incoming::new(config.endpoints.port, requests_tx).run(incoming_pool);
         });
 
-    let mut state = Init::init(config.endpoints, store, requests_rx);
+    let outgoing_pool = PoolImpl::new(
+        config.outgoing_pool.block_size,
+        config.outgoing_pool.capacity,
+    );
+    let mut state = Init::init(config.endpoints, store, requests_rx, outgoing_pool);
 
+    trace!("starting state");
     loop {
         state = state.next();
     }

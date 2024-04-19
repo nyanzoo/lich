@@ -1,3 +1,4 @@
+use necronomicon::{ByteStr, SharedImpl};
 use net::session::SessionWriter;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -28,7 +29,7 @@ impl From<bool> for ConnectionState {
 
 #[derive(Clone, Debug)]
 pub(crate) struct Backend {
-    pub(crate) addr: String,
+    pub(crate) addr: ByteStr<SharedImpl>,
     pub(crate) role: ChainRole,
     pub(crate) session: SessionWriter,
     pub(crate) successor_connection: ConnectionState,
@@ -36,6 +37,6 @@ pub(crate) struct Backend {
 
 #[derive(Clone, Debug)]
 pub(crate) struct Frontend {
-    pub(crate) addr: String,
+    pub(crate) addr: ByteStr<SharedImpl>,
     pub(crate) session: SessionWriter,
 }

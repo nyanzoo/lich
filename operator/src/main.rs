@@ -4,7 +4,8 @@ use log::{debug, error, info, trace};
 use rayon::ThreadPoolBuilder;
 
 use config::OperatorConfig;
-use necronomicon::full_decode;
+use io::decode_packet_on_reader_and;
+use necronomicon::{PoolImpl, SharedImpl};
 use net::{session::Session, stream::TcpListener};
 use requests::System;
 
@@ -47,38 +48,29 @@ fn main() {
                 let session = Session::new(stream, 5);
                 info!("new session {:?}", session);
                 let (mut read_session, session_writer) = session.split();
-                loop {
-                    match full_decode(&mut read_session) {
-                        Ok(packet) => {
-                            let request: System = packet.into();
+                let pool = PoolImpl::new(1024, 1024);
+                decode_packet_on_reader_and(&mut read_session, &pool, |packet| {
+                    let request: System<SharedImpl> = packet.into();
 
-                            match request {
-                                System::Join(join) => {
-                                    info!("join: {:?}", join);
-                                    if let Err(err) = cluster.add(session_writer.clone(), join) {
-                                        error!("cluster.add: {}", err);
-                                        continue;
-                                    }
-                                }
-                                System::ReportAck(ack) => {
-                                    info!("report ack: {:?}", ack);
-                                    // TODO: remove session if ack is not ok!
-                                }
-                                _ => {
-                                    error!(
-                                        "expected join/report_ack request but got {:?}",
-                                        request
-                                    );
-                                    continue;
-                                }
+                    match request {
+                        System::Join(join) => {
+                            info!("join: {:?}", join);
+                            if let Err(err) = cluster.add(session_writer.clone(), join) {
+                                error!("cluster.add: {}", err);
+                                return false;
                             }
                         }
-                        Err(err) => {
-                            error!("full_decode: {}", err);
-                            break;
+                        System::ReportAck(ack) => {
+                            info!("report ack: {:?}", ack);
+                        }
+                        _ => {
+                            error!("expected join/report_ack request but got {:?}", request);
+                            return false;
                         }
                     }
-                }
+
+                    true
+                });
             }
             Err(err) => error!("listener.accept: {}", err),
         });

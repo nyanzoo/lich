@@ -43,7 +43,7 @@ impl Incoming {
     }
 
     // TODO: we need to have a request type that maps to clients, that way we can send the acks back to the correct client without having to send response back to `Incoming`.
-    pub fn run(self, buffer_pool_maker: impl Fn() -> PoolImpl) {
+    pub fn run(self, buffer_pool: PoolImpl) {
         info!("starting listening for incoming requests");
         let Self {
             listener,
@@ -69,7 +69,7 @@ impl Incoming {
                     info!("new session {:?}", session);
                     let (read, write) = session.split();
                     let ack_writer = write.clone();
-                    let buffer_pool = buffer_pool_maker();
+                    let buffer_pool = buffer_pool.clone();
                     // I think the acks need to be oneshots that are per
                     pool.spawn(|| {
                         debug!("spawned thread for requests on session {:?}", read);

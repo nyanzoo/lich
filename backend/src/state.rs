@@ -15,7 +15,7 @@ use io::outgoing::Outgoing;
 use necronomicon::{
     full_decode,
     system_codec::{Join, Position, Role},
-    Ack, Encode, Packet, Shared, SharedImpl,
+    Ack, ByteStr, Encode, Packet, Pool, PoolImpl, SharedImpl,
 };
 use net::stream::{RetryConsistent, TcpStream};
 use requests::{ClientRequest, ClientResponse, PendingRequest, ProcessRequest, System};
@@ -30,20 +30,23 @@ pub trait State {
 
 pub struct Init {
     endpoint_config: EndpointConfig,
-    store: Store<String>,
+    store: Store,
     requests_rx: Receiver<ProcessRequest<SharedImpl>>,
+    outgoing_pool: PoolImpl,
 }
 
 impl Init {
     pub fn init(
         endpoint_config: EndpointConfig,
-        store: Store<String>,
+        store: Store,
         requests_rx: Receiver<ProcessRequest<SharedImpl>>,
+        outgoing_pool: PoolImpl,
     ) -> Box<dyn State> {
         Box::new(Self {
             endpoint_config,
             store,
             requests_rx,
+            outgoing_pool,
         }) as _
     }
 }
@@ -54,6 +57,7 @@ impl State for Init {
             endpoint_config,
             store,
             requests_rx,
+            outgoing_pool,
         } = *self;
 
         debug!("initialized and moving to waiting for operator");
@@ -70,16 +74,19 @@ impl State for Init {
             store,
             operator,
             requests_rx,
+            outgoing_pool,
         })
     }
 }
 
 pub struct WaitingForOperator {
-    store: Store<String>,
+    store: Store,
 
     operator: OperatorConnection,
 
     requests_rx: Receiver<ProcessRequest<SharedImpl>>,
+
+    outgoing_pool: PoolImpl,
 }
 
 impl State for WaitingForOperator {
@@ -88,6 +95,7 @@ impl State for WaitingForOperator {
             store,
             operator,
             requests_rx,
+            outgoing_pool,
         } = *self;
 
         // Get the `Report` from operator.
@@ -117,15 +125,21 @@ impl State for WaitingForOperator {
 
         let (outgoing, ack_rx) = if let Some(outgoing_addr) = outgoing_addr {
             let (ack_tx, ack_rx) = bounded(CHANNEL_CAPACITY);
-            trace!("creating outgoing to {}", outgoing_addr);
-            match Outgoing::new(outgoing_addr.clone(), outgoing_rx, ack_tx) {
+            trace!("creating outgoing to {:?}", outgoing_addr);
+            match Outgoing::new(
+                outgoing_addr.as_str().expect("valid addr"),
+                outgoing_rx,
+                ack_tx,
+                outgoing_pool.clone(),
+            ) {
                 Ok(outgoing) => (Some(outgoing), Some(ack_rx)),
                 Err(err) => {
-                    warn!("failed to create outgoing to {}: {}", outgoing_addr, err);
+                    warn!("failed to create outgoing to {:?}: {}", outgoing_addr, err);
                     return Box::new(WaitingForOperator {
                         store,
                         operator,
                         requests_rx,
+                        outgoing_pool,
                     });
                 }
             }
@@ -148,6 +162,7 @@ impl State for WaitingForOperator {
             outgoing_tx,
 
             outgoing,
+            outgoing_pool,
         })
     }
 }
@@ -155,9 +170,9 @@ impl State for WaitingForOperator {
 pub struct Ready {
     position: Position<SharedImpl>,
 
-    store: Store<String>,
+    store: Store,
     not_ready: Vec<ProcessRequest<SharedImpl>>,
-    pending: HashMap<u128, PendingRequest<SharedImpl>>,
+    pending: HashMap<necronomicon::Uuid, PendingRequest<SharedImpl>>,
 
     operator: OperatorConnection,
 
@@ -166,6 +181,8 @@ pub struct Ready {
     outgoing_tx: Sender<Packet<SharedImpl>>,
 
     outgoing: Option<Outgoing>,
+
+    outgoing_pool: PoolImpl,
 }
 
 impl State for Ready {
@@ -180,14 +197,16 @@ impl State for Ready {
             requests_rx,
             outgoing_tx,
             outgoing,
+            outgoing_pool,
         } = *self;
 
+        trace!("processing not ready requests");
         for prequest in not_ready.drain(..) {
             if let Position::Tail { .. } = position {
-                let mut buf = vec![0; 1024 * 1024]; // TODO: handle buffer smarter later!
+                let mut buffer = outgoing_pool.acquire().expect("acquire");
 
                 let (request, pending) = prequest.into_parts();
-                let response = store.commit_patch(request, &mut buf);
+                let response = store.commit_patch(request, &mut buffer);
                 let response = ClientResponse::from(response);
 
                 pending.complete(response);
@@ -202,6 +221,8 @@ impl State for Ready {
                 pending.insert(id, pending_request);
             }
         }
+
+        trace!("setup select for operator, ack, or client request");
 
         let mut sel = Select::new();
         let operator_tx = operator.tx();
@@ -219,6 +240,7 @@ impl State for Ready {
         let oper = sel.select();
         match oper.index() {
             i if i == operator_id => {
+                trace!("got operator message");
                 let system = oper.recv(&operator_rx).expect("recv");
                 trace!("got system packet: {:?}", system);
                 match system {
@@ -243,6 +265,7 @@ impl State for Ready {
                             requests_rx,
                             outgoing_tx,
                             outgoing,
+                            outgoing_pool,
                         });
                     }
                     _ => {
@@ -251,16 +274,17 @@ impl State for Ready {
                 }
             }
             i if i == ack_rx_id => {
+                trace!("got ack");
                 // only get acks if we are not tail
                 if let Some(ack_rx) = ack_rx.as_ref() {
                     let response = oper.recv(ack_rx).expect("recv");
                     trace!("got ack: {:?}", response);
 
-                    let id = response.header().uuid();
+                    let id = response.header().uuid;
+                    let mut buffer = outgoing_pool.acquire().expect("acquire");
                     // TODO: maybe take from config?
-                    let mut buf = vec![0; 1024 * 1024];
-                    for packet in store.commit_pending(id, &mut buf) {
-                        let id = packet.header().uuid();
+                    for packet in store.commit_pending(id, &mut buffer) {
+                        let id = packet.header().uuid;
                         if let Some(request) = pending.remove(&id) {
                             request.complete(ClientResponse::from(packet));
                         } else {
@@ -270,6 +294,7 @@ impl State for Ready {
                 }
             }
             i if i == request_rx_id => {
+                trace!("got client request");
                 let prequest = oper.recv(&requests_rx).expect("recv");
                 trace!("got request: {:?}", prequest);
 
@@ -287,11 +312,11 @@ impl State for Ready {
                         pending.complete(ClientResponse::Transfer(transfer.ack()));
                     }
                     Position::Tail { .. } => {
-                        let mut buf = vec![0; 1024]; // TODO: handle buffer smarter later!
+                        let mut buffer = outgoing_pool.acquire().expect("acquire");
 
                         let (request, pending) = prequest.into_parts();
                         trace!("committing patch {request:?}, since we are tail");
-                        let response = store.commit_patch(request, &mut buf);
+                        let response = store.commit_patch(request, &mut buffer);
                         let response = ClientResponse::from(response);
 
                         pending.complete(response);
@@ -308,6 +333,7 @@ impl State for Ready {
                                 store,
                                 operator,
                                 requests_rx,
+                                outgoing_pool,
                             });
                         }
 
@@ -330,6 +356,7 @@ impl State for Ready {
             requests_rx: requests_rx.clone(),
             outgoing_tx,
             outgoing,
+            outgoing_pool,
         })
     }
 }
@@ -338,8 +365,8 @@ pub struct Update {
     last_position: Position<SharedImpl>,
     new_position: Position<SharedImpl>,
 
-    store: Store<String>,
-    pending: HashMap<u128, PendingRequest<SharedImpl>>,
+    store: Store,
+    pending: HashMap<necronomicon::Uuid, PendingRequest<SharedImpl>>,
 
     operator: OperatorConnection,
 
@@ -348,6 +375,7 @@ pub struct Update {
     outgoing_tx: Sender<Packet<SharedImpl>>,
 
     outgoing: Option<Outgoing>,
+    outgoing_pool: PoolImpl,
 }
 
 impl State for Update {
@@ -365,6 +393,7 @@ impl State for Update {
             requests_rx,
             outgoing_tx,
             outgoing,
+            outgoing_pool,
         } = *self;
 
         if last_position == new_position {
@@ -378,6 +407,7 @@ impl State for Update {
                 requests_rx,
                 outgoing_tx,
                 outgoing,
+                outgoing_pool,
             })
         } else {
             drop(outgoing);
@@ -399,16 +429,22 @@ impl State for Update {
 
             let (outgoing, ack_rx) = if let Some(outgoing_addr) = outgoing_addr {
                 let (ack_tx, ack_rx) = bounded(CHANNEL_CAPACITY);
-                trace!("creating outgoing to {}", outgoing_addr);
+                trace!("creating outgoing to {:?}", outgoing_addr);
 
-                match Outgoing::new(outgoing_addr.clone(), outgoing_rx, ack_tx) {
+                match Outgoing::new(
+                    outgoing_addr.as_str().expect("valid addr"),
+                    outgoing_rx,
+                    ack_tx,
+                    outgoing_pool.clone(),
+                ) {
                     Ok(outgoing) => (Some(outgoing), Some(ack_rx)),
                     Err(err) => {
-                        warn!("failed to create outgoing to {}: {}", outgoing_addr, err);
+                        warn!("failed to create outgoing to {:?}: {}", outgoing_addr, err);
                         return Box::new(WaitingForOperator {
                             store,
                             operator,
                             requests_rx,
+                            outgoing_pool,
                         });
                     }
                 }
@@ -417,6 +453,7 @@ impl State for Update {
             };
 
             if matches!(new_position, Position::Candidate) {
+                trace!("moving to transfer");
                 Box::new(Transfer {
                     store,
                     operator,
@@ -424,8 +461,10 @@ impl State for Update {
                     requests_rx,
                     outgoing_tx,
                     outgoing,
+                    outgoing_pool,
                 })
             } else {
+                trace!("moving to ready");
                 // TODO: handle role change here!
                 // Outgoing loop should at least be paused?
                 // If there are changes we might need to close the outgoing loop and start a new one.
@@ -439,6 +478,7 @@ impl State for Update {
                     requests_rx,
                     outgoing_tx,
                     outgoing,
+                    outgoing_pool,
                 })
             }
         }
@@ -446,7 +486,7 @@ impl State for Update {
 }
 
 pub struct Transfer {
-    store: Store<String>,
+    store: Store,
 
     operator: OperatorConnection,
 
@@ -455,6 +495,7 @@ pub struct Transfer {
     outgoing_tx: Sender<Packet<SharedImpl>>,
 
     outgoing: Option<Outgoing>,
+    outgoing_pool: PoolImpl,
 }
 
 impl State for Transfer {
@@ -466,19 +507,22 @@ impl State for Transfer {
             requests_rx,
             outgoing_tx,
             outgoing,
+            outgoing_pool,
         } = *self;
 
         // TODO: handle transfer change here!
         if let Some(outgoing) = outgoing {
             info!("transfering store to {:?}", outgoing.addr);
             // TODO: if we don't want to nuke the store we will need to send versions!
-            for transfer in store.deconstruct_iter() {
+            for transfer in store.deconstruct_iter(outgoing_pool.clone()) {
                 outgoing_tx.send(Packet::Transfer(transfer)).expect("send");
             }
 
+            let mut owned = outgoing_pool.acquire().expect("acquire");
+
             Box::new(Ready {
                 position: Position::Middle {
-                    next: outgoing.addr.clone(),
+                    next: ByteStr::from_owned(&outgoing.addr, &mut owned).expect("valid addr"),
                 },
                 store,
                 not_ready: Default::default(),
@@ -488,6 +532,7 @@ impl State for Transfer {
                 requests_rx,
                 outgoing_tx,
                 outgoing: Some(outgoing),
+                outgoing_pool,
             })
         } else {
             Box::new(Ready {
@@ -500,6 +545,7 @@ impl State for Transfer {
                 requests_rx,
                 outgoing_tx,
                 outgoing,
+                outgoing_pool,
             })
         }
     }
@@ -535,8 +581,11 @@ impl OperatorConnection {
         let mut operator_read = BufReader::new(operator.clone());
         let mut operator_write = operator.clone();
 
+        let pool = PoolImpl::new(1024, 1024);
+        let read_pool = pool.clone();
         let read = std::thread::spawn(move || {
-            let packet = full_decode(&mut operator_read).expect("decode");
+            let mut buffer = read_pool.acquire().expect("acquire");
+            let packet = full_decode(&mut operator_read, &mut buffer, None).expect("decode");
 
             let System::JoinAck(ack) = System::from(packet.clone()) else {
                 panic!("expected join ack but got {:?}", packet);
@@ -546,7 +595,8 @@ impl OperatorConnection {
 
             // Get the `Report` from operator.
             let report = loop {
-                match full_decode(&mut operator_read) {
+                let mut owned = read_pool.acquire().expect("acquire");
+                match full_decode(&mut operator_read, &mut owned, None) {
                     Ok(packet) => {
                         let operator_msg = System::from(packet);
 
@@ -559,7 +609,8 @@ impl OperatorConnection {
                         }
                     }
                     Err(err) => {
-                        panic!("err: {}", err);
+                        warn!("err: {}", err);
+                        return;
                     }
                 }
             };
@@ -568,14 +619,16 @@ impl OperatorConnection {
             state_tx.send(report).expect("send report");
 
             loop {
-                match full_decode(&mut operator_read) {
+                let mut owned = read_pool.acquire().expect("acquire");
+                match full_decode(&mut operator_read, &mut owned, None) {
                     Ok(packet) => {
                         let operator_msg = System::from(packet);
 
                         state_tx.send(operator_msg).expect("send");
                     }
                     Err(err) => {
-                        panic!("err: {}", err);
+                        warn!("err: {}", err);
+                        break;
                     }
                 }
             }
@@ -591,6 +644,8 @@ impl OperatorConnection {
 
             debug!("got fqdn: {}", fqdn);
 
+            let mut owned = pool.acquire().expect("acquire");
+
             // TODO:
             // We will likely pick to use the same port for each BE node.
             // But we need a way to identify each node.
@@ -598,7 +653,10 @@ impl OperatorConnection {
             let join = Join::new(
                 1,
                 Uuid::new_v4().as_u128(),
-                Role::Backend(format!("{}:{}", fqdn, our_port)),
+                Role::Backend(
+                    ByteStr::from_owned(format!("{}:{}", fqdn, our_port), &mut owned)
+                        .expect("valid addr"),
+                ),
                 version,
                 false,
             );
@@ -615,7 +673,7 @@ impl OperatorConnection {
                 let oper = sel.select();
                 match oper.index() {
                     i if i == state_rx_id => {
-                        let system: System = oper.recv(&state_rx).expect("recv");
+                        let system: System<_> = oper.recv(&state_rx).expect("recv");
                         trace!("got system packet: {:?}", system);
                         system.encode(&mut operator_write).expect("encode");
                         operator_write.flush().expect("flush");

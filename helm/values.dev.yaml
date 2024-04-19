@@ -7,11 +7,38 @@ backend:
 
     [store]
     path = '/opt/lich/store'
-    meta_size = 1024
-    node_size = 1048576
-    version = 1
+    version = 'V1'
+
+    [store.meta]
+    max_disk_usage = 4096
+    max_key_size = 128
+
+    [store.data]
+    node_size = 4096
+
+    [incoming_pool]
+    block_size = 4096
+    capacity = 1024
+
+    [outgoing_pool]
+    block_size = 4096
+    capacity = 1024
 frontend:
   image: frontend
+  imagePullPolicy: IfNotPresent
   replicas: 3
+  logLevel: debug
+  config: |
+    [endpoints]
+    port=6666
+    operator_addr='operator-0.operator.default.svc.cluster.local:6666'
+
+    [incoming_pool]
+    block_size = 4096
+    capacity = 1024
+
+    [outgoing_pool]
+    block_size = 4096
+    capacity = 1024
 operator:
   image: operator

@@ -26,8 +26,8 @@ spec:
               readOnly: true
           resources:
             limits:
-              memory: "128Mi"
-              cpu: "500m"
+              memory: "32Mi"
+              cpu: "100m"
           ports:
               - containerPort: 6666
       volumes:

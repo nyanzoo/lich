@@ -6,11 +6,11 @@ version = "0.1.0"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-crossbeam = "0.8"
-log = "0.4"
-thiserror = "1.0"
+crossbeam = { workspace = true }
+log = { workspace = true }
+thiserror = { workspace = true }
 
-necronomicon = {git = "https://github.com/nyanzoo/necronomicon", branch = "develop"}
+necronomicon = { workspace = true }
 
 [dev-dependencies]
 

@@ -1,7 +1,7 @@
 use std::{
     collections::BTreeMap,
-    fs::{create_dir_all, read, remove_dir},
-    io::Cursor,
+    fs::{create_dir_all, remove_dir, File},
+    io::{Cursor, Read, Seek, SeekFrom},
     mem::size_of,
     path::PathBuf,
 };
@@ -9,17 +9,16 @@ use std::{
 use hashlink::LinkedHashMap;
 use log::{trace, warn};
 
-use config::StoreConfig;
 use necronomicon::{
-    system_codec::Transfer, BinaryData, ByteStr, Decode, Encode, Owned, OwnedImpl, Packet, Shared,
-    SharedImpl, FAILED_TO_PUSH_TO_TRANSACTION_LOG, INTERNAL_ERROR, KEY_DOES_NOT_EXIST,
-    QUEUE_ALREADY_EXISTS, QUEUE_DOES_NOT_EXIST,
+    system_codec::Transfer, BinaryData, ByteStr, Decode, Encode, Owned, OwnedImpl, Packet,
+    Pool as _, PoolImpl, Shared, SharedImpl, Uuid, FAILED_TO_PUSH_TO_TRANSACTION_LOG,
+    INTERNAL_ERROR, KEY_DOES_NOT_EXIST, QUEUE_ALREADY_EXISTS, QUEUE_DOES_NOT_EXIST, QUEUE_EMPTY,
 };
 use phylactery::{
     buffer::MmapBuffer,
-    dequeue::Dequeue,
+    dequeue::{self, Dequeue},
     entry::Version,
-    kv_store::{Graveyard, Lookup, Store as KVStore},
+    kv_store::{config::Config, Graveyard, Lookup, Store as KVStore},
     ring_buffer::{self, ring_buffer},
 };
 use requests::ClientRequest;
@@ -48,12 +47,12 @@ impl CommitStatus {
 // We also need to write some extra data to disk for the transaction log.
 
 pub struct Store {
-    kvs: KVStore<SharedImpl>,
+    kvs: KVStore,
     root: String,
     api_version: Version,
     store_version: u128,
     dequeues: BTreeMap<ByteStr<SharedImpl>, Dequeue>,
-    pending: hashlink::LinkedHashMap<u128, CommitStatus>,
+    pending: hashlink::LinkedHashMap<necronomicon::Uuid, CommitStatus>,
     transaction_log_tx: ring_buffer::Pusher<MmapBuffer>,
     transaction_log_rx: ring_buffer::Popper<MmapBuffer>,
 }
@@ -70,7 +69,7 @@ impl Store {
     ///
     /// # Errors
     /// See `error::Error` for details.
-    pub fn new(config: &StoreConfig) -> Result<Self, Error> {
+    pub fn new(config: Config, pool: PoolImpl) -> Result<Self, Error> {
         let dir_all_res = create_dir_all(&config.path);
         trace!("creating store at {}, res {:?}", config.path, dir_all_res);
 
@@ -91,6 +90,7 @@ impl Store {
         let graveyard = Graveyard::new(graveyard_path, popper);
 
         std::thread::spawn(move || {
+            trace!("starting graveyard");
             graveyard.bury(10);
         });
 
@@ -103,28 +103,26 @@ impl Store {
         let (transaction_log_tx, transaction_log_rx) = ring_buffer(mmap, api_version)?;
 
         trace!("creating kv store at {} & {}", meta_path, data_path);
-        let mut kvs = KVStore::new(
-            meta_path,
-            config.meta_size,
-            config.max_key_size.into(),
-            data_path,
-            config.node_size,
-            api_version,
-            pusher,
-        )?;
+        let mut kvs = KVStore::new(config.clone(), pusher)?;
 
         // NOTE: we might want to consider not storing the version this way.
         // As it prohibits the user from using this key.
-        let mut buf = vec![];
+
+        let mut buffer = pool.acquire().expect("acquire buffer");
         let store_version = kvs
-            .get(&Key::try_from("version").expect("store version"), &mut buf)
+            .get(
+                &Self::version_key(&mut buffer).expect("store version"),
+                &mut buffer,
+            )
             .expect("get version");
 
         let store_version = match store_version {
             Lookup::Absent => 0,
             Lookup::Found(data) => {
-                let mut buf = Cursor::new(data.into_inner());
-                u128::decode(&mut buf).expect("decode version")
+                data.verify().expect("verify version");
+                let inner = data.into_inner();
+                let data = inner.data().as_slice();
+                u128::decode(&mut Cursor::new(data)).expect("decode version")
             }
         };
 
@@ -151,13 +149,9 @@ impl Store {
 
     fn update_version(&mut self, buffer: &mut OwnedImpl) -> Result<(), Error> {
         self.store_version += 1;
-        let version = self.version_key(buffer)?;
-        let store_version = self.version_value(buffer)?;
-        self.kvs.insert(
-            BinaryData::new(version),
-            BinaryData::new(store_version),
-            buffer,
-        )?;
+        let version = Self::version_key(buffer)?;
+        let store_version = self.version_value();
+        self.kvs.insert(version, &store_version)?;
         Ok(())
     }
 
@@ -168,8 +162,8 @@ impl Store {
 
     pub(crate) fn commit_pending(
         &mut self,
-        id: u128,
-        buf: &mut Vec<u8>,
+        id: Uuid,
+        buf: &mut OwnedImpl,
     ) -> Vec<Packet<SharedImpl>> {
         if let Some(commit) = self.pending.get_mut(&id) {
             commit.complete();
@@ -200,9 +194,8 @@ impl Store {
 
         while let Err(err) = self.transaction_log_tx.push(&tl_patch) {
             if let phylactery::Error::EntryTooBig { .. } = err {
-                let mut buf = vec![];
                 self.transaction_log_rx
-                    .pop(&mut buf)
+                    .pop(buffer)
                     .expect("must be able to pop");
             } else {
                 warn!("failed to push to transaction log: {}", err);
@@ -214,12 +207,12 @@ impl Store {
             // dequeue
             ClientRequest::CreateQueue(queue) => {
                 let path = queue.path();
-                let ack = if self.dequeues.contains_key(&path.to_string()) {
-                    warn!("queue({}) already exists", path);
+                let ack = if self.dequeues.contains_key(&path) {
+                    warn!("queue({:?}) already exists", path);
                     queue.nack(QUEUE_ALREADY_EXISTS)
                 } else {
                     match Dequeue::new(
-                        format!("{}/{}", self.root, path),
+                        format!("{}/{:?}", self.root, path),
                         queue.node_size(),
                         self.api_version,
                     ) {
@@ -244,7 +237,8 @@ impl Store {
             ClientRequest::DeleteQueue(queue) => {
                 let path = queue.path();
                 let ack = if self.dequeues.remove(path).is_some() {
-                    remove_dir(format!("{}/{}", self.root, path)).expect("must be able to remove");
+                    remove_dir(format!("{}/{:?}", self.root, path))
+                        .expect("must be able to remove");
                     trace!("deleted queue {:?}", path);
 
                     if let Err(err) = self.update_version(buffer) {
@@ -254,7 +248,7 @@ impl Store {
                         queue.ack()
                     }
                 } else {
-                    warn!("queue({}) does not exist", path);
+                    warn!("queue({:?}) does not exist", path);
                     queue.nack(QUEUE_DOES_NOT_EXIST)
                 };
 
@@ -264,8 +258,10 @@ impl Store {
             ClientRequest::Enqueue(enqueue) => {
                 let path = enqueue.path();
                 let ack = if let Some(queue) = self.dequeues.get_mut(path) {
-                    let push = queue.push(enqueue.value()).expect("queue full");
-                    trace!("pushed to queue({}): {:?}", path, push);
+                    let push = queue
+                        .push(enqueue.value().data().as_slice())
+                        .expect("queue full");
+                    trace!("pushed to queue({:?}): {:?}", path, push);
 
                     if let Err(err) = self.update_version(buffer) {
                         warn!("failed to update version: {err:?}");
@@ -274,7 +270,7 @@ impl Store {
                         enqueue.ack()
                     }
                 } else {
-                    warn!("queue({}) does not exist", path);
+                    warn!("queue({:?}) does not exist", path);
                     enqueue.nack(QUEUE_DOES_NOT_EXIST)
                 };
 
@@ -285,16 +281,19 @@ impl Store {
                 let path = dequeue.path();
                 let ack = if let Some(queue) = self.dequeues.get_mut(path) {
                     let pop = queue.pop(buffer).expect("queue empty");
-                    trace!("popped from queue({}): {:?}", path, pop);
+                    trace!("popped from queue({:?}): {:?}", path, pop);
 
                     if let Err(err) = self.update_version(buffer) {
                         warn!("failed to update version: {err:?}");
                         dequeue.nack(INTERNAL_ERROR)
                     } else {
-                        dequeue.ack(buffer.to_vec())
+                        match pop {
+                            dequeue::Pop::Popped(data) => dequeue.ack(data.into_inner()),
+                            dequeue::Pop::WaitForFlush => dequeue.nack(QUEUE_EMPTY),
+                        }
                     }
                 } else {
-                    warn!("queue({}) does not exist", path);
+                    warn!("queue({:?}) does not exist", path);
                     dequeue.nack(QUEUE_DOES_NOT_EXIST)
                 };
 
@@ -302,24 +301,29 @@ impl Store {
             }
 
             // kv store
-            ClientRequest::Put(put) => match self.kvs.insert(*put.key(), put.value(), buffer) {
-                Ok(_) => {
-                    self.store_version += 1;
-                    let ack = if let Err(err) = self.update_version(buffer) {
-                        warn!("failed to update version: {err:?}");
-                        put.nack(INTERNAL_ERROR)
-                    } else {
-                        put.ack()
-                    };
+            ClientRequest::Put(put) => {
+                match self
+                    .kvs
+                    .insert(put.key().clone(), put.value().data().as_slice())
+                {
+                    Ok(_) => {
+                        self.store_version += 1;
+                        let ack = if let Err(err) = self.update_version(buffer) {
+                            warn!("failed to update version: {err:?}");
+                            put.nack(INTERNAL_ERROR)
+                        } else {
+                            put.ack()
+                        };
 
-                    Packet::PutAck(ack)
+                        Packet::PutAck(ack)
+                    }
+                    Err(err) => {
+                        warn!("failed to insert into kv store: {}", err);
+                        Packet::PutAck(put.nack(INTERNAL_ERROR))
+                    }
                 }
-                Err(err) => {
-                    warn!("failed to insert into kv store: {}", err);
-                    Packet::PutAck(put.nack(INTERNAL_ERROR))
-                }
-            },
-            ClientRequest::Delete(delete) => match self.kvs.delete(delete.key(), buffer) {
+            }
+            ClientRequest::Delete(delete) => match self.kvs.delete(delete.key()) {
                 Ok(_) => {
                     self.store_version += 1;
                     let ack = if let Err(err) = self.update_version(buffer) {
@@ -359,20 +363,50 @@ impl Store {
         res
     }
 
-    pub(crate) fn deconstruct_iter(&self) -> impl Iterator<Item = Transfer<SharedImpl>> + '_ {
-        self.kvs.deconstruct_iter().map(|path| {
-            let content =
-                read(&path.as_str().expect("valid utf8 str")).expect("must be able to read file");
-            let uuid = uuid::Uuid::new_v4().as_u128();
-            Transfer::new(self.api_version, uuid, path, content)
-        })
+    pub(crate) fn deconstruct_iter(
+        &self,
+        pool: PoolImpl,
+    ) -> impl Iterator<Item = Transfer<SharedImpl>> + '_ {
+        self.kvs
+            .deconstruct_iter(u64::try_from(pool.block_size()).expect("usize -> u64"))
+            .filter_map(move |(path, off)| {
+                let mut file = File::open(&path).expect("file open");
+                file.seek(SeekFrom::Start(off)).expect("seek file");
+
+                // using two buffers like this is wasteful, but it is easy for now.
+                let mut buffer = pool.acquire().expect("acquire buffer");
+                let path = ByteStr::from_owned(path, &mut buffer).expect("buffer");
+
+                let mut buffer = pool.acquire().expect("acquire buffer");
+
+                let mut unfilled = buffer.unfilled();
+                let bytes = file.read(&mut unfilled).expect("read file");
+                if bytes == 0 {
+                    return None;
+                }
+
+                buffer.fill(bytes);
+
+                let shared = buffer.into_shared();
+                let version: necronomicon::Version = necronomicon::Version::from(self.api_version);
+                Some(Transfer::new(
+                    version,
+                    uuid::Uuid::new_v4().as_u128(),
+                    path,
+                    off,
+                    BinaryData::new(shared),
+                ))
+            })
     }
 
     pub(crate) fn reconstruct(&self, transfer: &Transfer<SharedImpl>) {
-        self.kvs.reconstruct(transfer.path(), transfer.content())
+        self.kvs.reconstruct(
+            transfer.path().as_str().expect("valid transfer path"),
+            transfer.content().data().as_slice(),
+        )
     }
 
-    fn version_key(&mut self, buffer: &mut OwnedImpl) -> Result<SharedImpl, Error> {
+    fn version_key(buffer: &mut OwnedImpl) -> Result<BinaryData<SharedImpl>, Error> {
         const VERSION: &str = "version";
         if buffer.unfilled_capacity() < VERSION.len() + size_of::<usize>() {
             Err(Error::Necronomicon(necronomicon::Error::OwnedRemaining {
@@ -382,80 +416,66 @@ impl Store {
         } else {
             let mut unfilled = buffer.unfilled();
 
-            VERSION.len().encode(unfilled)?;
+            VERSION.len().encode(&mut unfilled)?;
             buffer.fill(size_of::<usize>());
 
             let version = VERSION.as_bytes();
-            version.encode(unfilled)?;
+            let mut unfilled = buffer.unfilled();
+            version.encode(&mut unfilled)?;
             buffer.fill(version.len());
 
             let buffer = buffer.split_at(version.len() + size_of::<usize>());
-            Ok(buffer.into_shared())
+            Ok(BinaryData::new(buffer.into_shared()))
         }
     }
 
-    fn version_value(&self, buffer: &mut OwnedImpl) -> Result<SharedImpl, Error> {
-        if buffer.unfilled_capacity() < size_of::<u128>() {
-            Err(Error::Necronomicon(necronomicon::Error::OwnedRemaining {
-                acquire: size_of::<u128>(),
-                capacity: buffer.unfilled_capacity(),
-            }))
-        } else {
-            let mut unfilled = buffer.unfilled();
-            self.store_version
-                .encode(&mut unfilled)
-                .expect("encode version");
-            buffer.fill(size_of::<u128>());
-            let buffer = buffer.split_at(size_of::<u128>());
-            Ok(buffer.into_shared())
-        }
+    fn version_value(&self) -> Vec<u8> {
+        let mut unfilled = vec![];
+        self.store_version
+            .encode(&mut unfilled)
+            .expect("encode version");
+        unfilled
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        cmp::min,
-        path::Path,
-        sync::atomic::{AtomicU64, Ordering},
-    };
+    use std::path::Path;
 
+    use phylactery::kv_store::config::{Config, Data, Metadata};
     use tempfile::tempdir;
 
-    use config::StoreConfig;
     use necronomicon::{
-        kv_store_codec::{Delete, Get, Key, Put},
-        Packet,
+        binary_data,
+        kv_store_codec::{Delete, Get, Put},
+        Packet, Pool, PoolImpl,
     };
     use requests::ClientRequest;
 
     use super::Store;
-
-    static ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     #[test]
     fn test_commit_pending() {
         let dir = tempdir().expect("temp file");
         let path = dir.path().to_str().unwrap().to_string();
 
-        let config = StoreConfig {
+        let config = Config {
             path: path.clone(),
-            meta_size: 1024,
-            max_key_size: 128,
-            node_size: 1024,
-            version: 1,
+            meta: Metadata {
+                max_disk_usage: 2048,
+                max_key_size: 128,
+            },
+            data: Data { node_size: 1024 },
+            version: phylactery::entry::Version::V1,
         };
-        let mut store = Store::new(&config).expect("store");
+        let pool = PoolImpl::new(1024, 1024);
+        let mut store = Store::new(config, pool.clone()).expect("store");
 
-        let put = Put::new(
-            generate_header(),
-            generate_key("key"),
-            "kittens".as_bytes().to_vec(),
-        );
+        let put = Put::new(1, 1, binary_data(b"key"), binary_data(b"kittens"));
 
-        let get = Get::new(generate_header(), generate_key("key"));
+        let get = Get::new(1, 2, binary_data(b"key"));
 
-        let delete = Delete::new(generate_header(), generate_key("key"));
+        let delete = Delete::new(1, 3, binary_data(b"key"));
 
         let patches = [
             ClientRequest::Put(put.clone()),
@@ -470,7 +490,7 @@ mod tests {
         let mut results = vec![];
         // Get acks in reverse to show we still get the correct packets
         for id in patches.iter().rev().map(|patch| patch.id()) {
-            let mut buf = vec![];
+            let mut buf = pool.acquire().expect("acquire buffer");
             let packets = store.commit_pending(id, &mut buf);
             results.extend(packets);
         }
@@ -478,25 +498,12 @@ mod tests {
         assert_eq!(results.len(), 3);
 
         assert_eq!(results[0], Packet::PutAck(put.ack()));
-        assert_eq!(
-            results[1],
-            Packet::GetAck(get.ack("kittens".as_bytes().to_vec()))
-        );
+        assert_eq!(results[1], Packet::GetAck(get.ack(binary_data(b"kittens"))));
         assert_eq!(results[2], Packet::DeleteAck(delete.ack()));
 
         hexyl(&Path::new(&format!("{}/meta.bin", path)));
-    }
 
-    fn generate_header() -> (u8, u128) {
-        let id = ID_COUNTER.fetch_add(1, Ordering::Relaxed);
-        (1, id as u128)
-    }
-
-    fn generate_key(key: &str) -> Key {
-        let mut slice = [0; 32];
-        let len = min(key.len(), slice.len());
-        slice[..len].copy_from_slice(&key.as_bytes()[..len]);
-        Key::new(slice)
+        drop(store);
     }
 
     #[allow(dead_code)]
