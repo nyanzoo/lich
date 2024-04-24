@@ -51,7 +51,7 @@ enum Scenario {
 }
 
 fn run(host: String, port: u16, scenario: Scenario) {
-    let pool = PoolImpl::new(1024, 1024);
+    let pool = PoolImpl::new(2048, 4096);
     let start = Instant::now();
     match scenario {
         Scenario::PutOnly {
@@ -130,6 +130,7 @@ fn run(host: String, port: u16, scenario: Scenario) {
                 let mut buffer = pool.acquire().expect("pool.acquire");
                 println!("i: {:?}", i);
                 let response = full_decode(&mut stream, &mut buffer, None).unwrap();
+                println!("response: {:?}", response);
                 match response {
                     Packet::PutAck(response) => {
                         if !packet_tracker.remove(&response.header().uuid) {

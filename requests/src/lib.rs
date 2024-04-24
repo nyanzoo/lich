@@ -1,7 +1,7 @@
 use std::io::{Read, Write};
 
 use crossbeam::channel::Sender;
-use log::trace;
+use log::{trace, warn};
 
 use necronomicon::{
     dequeue_codec::{
@@ -418,7 +418,9 @@ where
 {
     pub fn complete(self, response: ClientResponse<S>) {
         trace!("sending response: {:?}", response);
-        self.response_tx.send(response).expect("send");
+        if let Err(err) = self.response_tx.send(response) {
+            warn!("failed to send response due to: {:?}", err);
+        }
     }
 }
 

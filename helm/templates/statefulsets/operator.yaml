@@ -29,7 +29,7 @@ spec:
               memory: "32Mi"
               cpu: "100m"
           ports:
-              - containerPort: 6666
+              - containerPort: 666
       volumes:
         - name: operator-config
           configMap:

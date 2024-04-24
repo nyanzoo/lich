@@ -72,12 +72,16 @@ impl Incoming {
                     let buffer_pool = buffer_pool.clone();
                     // I think the acks need to be oneshots that are per
                     pool.spawn(|| {
-                        debug!("spawned thread for requests on session {:?}", read);
+                        let id = read.id();
+                        debug!("spawned thrad for requests on session {id}");
                         handle_requests(read, write, requests_tx, ack_tx, buffer_pool);
+                        debug!("thread for requests on session {id} exited");
                     });
                     pool.spawn(|| {
-                        debug!("spawned thread for acks for session {:?}", ack_writer);
+                        let id = ack_writer.id();
+                        debug!("spawned thread for acks for session {id}");
                         handle_acks(ack_writer, ack_rx);
+                        debug!("thread for acks for session {id} exited");
                     });
                 }
                 Err(err) => error!("listener.accept: {}", err),
@@ -88,24 +92,27 @@ impl Incoming {
 
 fn handle_acks(mut session: SessionWriter, ack_rx: Receiver<ClientResponse<SharedImpl>>) {
     loop {
-        if let Ok(ack) = ack_rx.recv() {
-            trace!("got ack {:?}", ack);
-            // TODO: need to see if we need to break here on some cases?
-            if let Err(err) = ack.encode(&mut session) {
-                trace!("failed to encode ack {ack:?} due to {err}, flushing session");
-                if let Err(err) = session.flush() {
-                    debug!("session.flush: {err}");
-                    break;
-                }
-                // encode again because first failed.
+        match ack_rx.recv() {
+            Ok(ack) => {
+                trace!("got ack {:?}", ack);
+                // TODO: need to see if we need to break here on some cases?
                 if let Err(err) = ack.encode(&mut session) {
-                    warn!("failed to encode ack {ack:?} due to {err}, flushing session");
-                    break;
+                    trace!("failed to encode ack {ack:?} due to {err}, flushing session");
+                    if let Err(err) = session.flush() {
+                        debug!("session.flush: {err}");
+                        break;
+                    }
+                    // encode again because first failed.
+                    if let Err(err) = ack.encode(&mut session) {
+                        warn!("failed to encode ack {ack:?} due to {err}, flushing session");
+                        break;
+                    }
                 }
             }
-        } else {
-            debug!("ack_rx.recv: closed");
-            break;
+            Err(err) => {
+                debug!("ack_rx.recv: {err}");
+                break;
+            }
         }
     }
 

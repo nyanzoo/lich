@@ -9,6 +9,6 @@ spec:
   ports:
     - name: operator
       protocol: TCP
-      port: 6666
-      targetPort: 6666
+      port: 666
+      targetPort: 666
   internalTrafficPolicy: Cluster

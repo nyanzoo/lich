@@ -189,9 +189,11 @@ impl Store {
     ) -> Packet<SharedImpl> {
         let mut tl_patch = vec![];
 
+        trace!("committing patch: {patch:?}");
         // TODO: make `push_encode`
         patch.encode(&mut tl_patch).expect("must be able to encode");
 
+        trace!("pushing {patch:?} to transaction log");
         while let Err(err) = self.transaction_log_tx.push(&tl_patch) {
             if let phylactery::Error::EntryTooBig { .. } = err {
                 self.transaction_log_rx
@@ -407,6 +409,7 @@ impl Store {
     }
 
     fn version_key(buffer: &mut OwnedImpl) -> Result<BinaryData<SharedImpl>, Error> {
+        trace!("creating version key");
         const VERSION: &str = "version";
         if buffer.unfilled_capacity() < VERSION.len() + size_of::<usize>() {
             Err(Error::Necronomicon(necronomicon::Error::OwnedRemaining {

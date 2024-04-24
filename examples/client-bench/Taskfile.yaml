@@ -3,8 +3,8 @@ version: 3
 tasks:
   put:
     cmds:
-      - cargo run --release -- -H 127.0.0.1 -p 6666 put-only --key-set cat --value-size 128 --count 1000
+      - cargo run --release -- -H 127.0.0.1 -p 666 put-only --key-set cat --value-size 128 --count 1000
 
   put_and_get:
     cmds:
-      - cargo run --release -- -H 127.0.0.1 -p 6666 put-and-get --key-set cat --value-size 128 --count 1000 --distribution 0.5
+      - cargo run --release -- -H 127.0.0.1 -p 666 put-and-get --key-set cat --value-size 128 --count 1000 --distribution 0.5

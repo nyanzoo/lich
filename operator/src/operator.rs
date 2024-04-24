@@ -65,6 +65,7 @@ impl ClusterInner {
         mut session: SessionWriter,
         join: Join<SharedImpl>,
     ) -> Result<(), Error> {
+        trace!("adding backend: {join:?}");
         let id = join.header().uuid;
 
         join.clone().ack().encode(&mut session)?;
@@ -201,6 +202,7 @@ impl ClusterInner {
         mut session: SessionWriter,
         join: Join<SharedImpl>,
     ) -> Result<(), Error> {
+        trace!("adding frontend: {join:?}");
         let id = join.header().uuid;
         let addr = join.addr().expect("addr").to_owned();
         if let Some(head) = self.head() {
@@ -241,6 +243,7 @@ impl ClusterInner {
     }
 
     fn add_observer(&mut self, session: SessionWriter) {
+        trace!("adding observer: {session:?}");
         self.observers.push(session);
     }
 
@@ -361,7 +364,7 @@ mod tests {
     fn add_backend() {
         let cluster = Cluster::default();
 
-        let head_stream = TcpStream::connect("head:6666".to_owned()).unwrap();
+        let head_stream = TcpStream::connect("head:666".to_owned()).unwrap();
         let (_, head) = Session::new(head_stream.clone(), 100).split();
 
         let join = Join::new(1, 1, Role::Backend(byte_str(b"head")), 1, false);
@@ -373,7 +376,7 @@ mod tests {
             Packet::Report(Report::new(1, 1, Position::Tail { candidate: None })),
         ]);
 
-        let middle_stream = TcpStream::connect("middle:6666".to_owned()).unwrap();
+        let middle_stream = TcpStream::connect("middle:666".to_owned()).unwrap();
         let (_, middle) = Session::new(middle_stream.clone(), 100).split();
 
         let join = Join::new(1, 2, Role::Backend(byte_str(b"middle")), 1, false);
@@ -393,7 +396,7 @@ mod tests {
             },
         ))]);
 
-        let tail_stream = TcpStream::connect("tail:6666".to_owned()).unwrap();
+        let tail_stream = TcpStream::connect("tail:666".to_owned()).unwrap();
         let (_, tail) = Session::new(tail_stream.clone(), 100).split();
 
         let join = Join::new(1, 3, Role::Backend(byte_str(b"tail")), 1, false);

@@ -5,10 +5,13 @@ metadata:
   labels:
     app: frontend
 spec:
-  type: LoadBalancer
+  # type: LoadBalancer
+  type: NodePort
   ports:
     - protocol: TCP
-      port: 6666
-      targetPort: 6666
+      port: 666
+      targetPort: 666
+      # comment out if not using NodePort
+      nodePort: 30666
   selector:
     app: frontend

@@ -35,3 +35,7 @@ tasks:
   test:
     cmds:
       - cargo test --all-targets --all-features
+
+  update-deps:
+    cmds:
+      - cargo update

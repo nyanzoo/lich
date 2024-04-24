@@ -1,14 +1,19 @@
-use std::io::{BufReader, Read, Write};
+use std::{
+    fmt::Debug,
+    io::{BufReader, Read, Write},
+};
 
 use log::debug;
 
 use crate::stream::TcpStream;
 
-#[derive(Debug)]
+static SESSION_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 pub struct SessionReader {
     stream: BufReader<TcpStream>,
     last_seen: u64,
     keep_alive: u64,
+    id: u64,
 }
 
 impl SessionReader {
@@ -20,6 +25,10 @@ impl SessionReader {
         let now = now();
         now - self.last_seen < self.keep_alive
     }
+
+    pub fn id(&self) -> u64 {
+        self.id
+    }
 }
 
 impl Read for SessionReader {
@@ -28,15 +37,32 @@ impl Read for SessionReader {
     }
 }
 
-#[derive(Debug)]
+impl Debug for SessionReader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SessionReader")
+            .field("last_seen", &self.last_seen)
+            .field("keep_alive", &self.keep_alive)
+            .field("id", &self.id)
+            .finish()
+    }
+}
+
 pub struct SessionWriter {
     stream: TcpStream,
+    id: u64,
+}
+
+impl SessionWriter {
+    pub fn id(&self) -> u64 {
+        self.id
+    }
 }
 
 impl Clone for SessionWriter {
     fn clone(&self) -> Self {
         Self {
             stream: self.stream.clone(),
+            id: self.id,
         }
     }
 }
@@ -51,11 +77,19 @@ impl Write for SessionWriter {
     }
 }
 
-#[derive(Debug)]
+impl Debug for SessionWriter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SessionWriter")
+            .field("id", &self.id)
+            .finish()
+    }
+}
+
 pub struct Session {
     stream: TcpStream,
     last_seen: u64,
     keep_alive: u64,
+    id: u64,
 }
 
 /// `Clone` for `Session` is implemented by cloning the underlying `TcpStream`.
@@ -66,6 +100,7 @@ impl Clone for Session {
             stream: self.stream.clone(),
             last_seen: self.last_seen,
             keep_alive: self.keep_alive,
+            id: self.id,
         }
     }
 }
@@ -76,6 +111,7 @@ impl Session {
             stream,
             last_seen: now(),
             keep_alive,
+            id: SESSION_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
         }
     }
 
@@ -99,9 +135,27 @@ impl Session {
             stream: reader,
             last_seen: self.last_seen,
             keep_alive: self.keep_alive,
+            id: self.id,
         };
-        let writer = SessionWriter { stream: writer };
+        let writer = SessionWriter {
+            stream: writer,
+            id: self.id,
+        };
         (reader, writer)
+    }
+
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+}
+
+impl Debug for Session {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Session")
+            .field("last_seen", &self.last_seen)
+            .field("keep_alive", &self.keep_alive)
+            .field("id", &self.id)
+            .finish()
     }
 }
 

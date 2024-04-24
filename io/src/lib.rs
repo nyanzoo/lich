@@ -28,12 +28,14 @@ where
                             trace!("got {:?} packet", packet);
 
                             if !service(packet) {
+                                trace!("service returned false");
                                 break 'pool;
                             }
                         }
                         Err(necronomicon::Error::BufferTooSmallForPacketDecode {
                             header, ..
                         }) => {
+                            trace!("buffer too small for packet decode");
                             let _ = previous_decoded_header.insert(header);
                             break 'decode;
                         }

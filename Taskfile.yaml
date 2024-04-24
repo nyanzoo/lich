@@ -9,9 +9,21 @@ includes:
     taskfile: ./frontend/Taskfile.yaml
     dir: ./frontend
 
+  io:
+    taskfile: ./io/Taskfile.yaml
+    dir: ./io
+
+  net:
+    taskfile: ./net/Taskfile.yaml
+    dir: ./net
+
   operator:
     taskfile: ./operator/Taskfile.yaml
     dir: ./operator
+
+  requests:
+    taskfile: ./requests/Taskfile.yaml
+    dir: ./requests
 
   example-client:
     taskfile: ./examples/client-test/Taskfile.yaml
@@ -26,7 +38,10 @@ tasks:
     cmds:
       - task: backend:test
       - task: frontend:test
+      - task: io:test
+      - task: net:test
       - task: operator:test
+      - task: requests:test
 
   build-debug:
     cmds:
@@ -44,7 +59,19 @@ tasks:
     cmds:
       - task: backend:clippy
       - task: frontend:clippy
+      - task: io:clippy
+      - task: net:clippy
       - task: operator:clippy
+      - task: requests:clippy
+
+  update-deps:
+    cmds:
+      - task: backend:update-deps
+      - task: frontend:update-deps
+      - task: io:update-deps
+      - task: net:update-deps
+      - task: operator:update-deps
+      - task: requests:update-deps
 
   build-all-images:
     cmds:
@@ -127,7 +154,7 @@ tasks:
 
   cluster-create:
     cmds:
-      - k3d cluster create lich --volume /tmp/lich:/opt/lich #-p 6666:6666
+      - k3d cluster create lich --volume /tmp/lich:/opt/lich -p 666:30666
       - kubectl label node k3d-lich-server-0 app=backend
 
   cluster-delete:

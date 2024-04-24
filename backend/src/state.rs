@@ -65,12 +65,13 @@ impl State for Init {
         let version = store.version();
 
         let operator = OperatorConnection::connect(
-            endpoint_config.operator_addr,
+            endpoint_config.operator_addr.clone(),
             endpoint_config.port,
             version,
         );
 
         Box::new(WaitingForOperator {
+            endpoint_config,
             store,
             operator,
             requests_rx,
@@ -80,6 +81,8 @@ impl State for Init {
 }
 
 pub struct WaitingForOperator {
+    endpoint_config: EndpointConfig,
+
     store: Store,
 
     operator: OperatorConnection,
@@ -92,6 +95,7 @@ pub struct WaitingForOperator {
 impl State for WaitingForOperator {
     fn next(self: Box<Self>) -> Box<dyn State> {
         let Self {
+            endpoint_config,
             store,
             operator,
             requests_rx,
@@ -100,7 +104,14 @@ impl State for WaitingForOperator {
 
         // Get the `Report` from operator.
         let operator_rx = operator.rx();
-        let packet = operator_rx.recv().expect("recv");
+        let Ok(packet) = operator_rx.recv() else {
+            return Box::new(Init {
+                store,
+                requests_rx,
+                outgoing_pool,
+                endpoint_config,
+            });
+        };
         let System::Report(report) = packet else {
             panic!("expected report but got {:?}", packet);
         };
@@ -136,6 +147,7 @@ impl State for WaitingForOperator {
                 Err(err) => {
                     warn!("failed to create outgoing to {:?}: {}", outgoing_addr, err);
                     return Box::new(WaitingForOperator {
+                        endpoint_config,
                         store,
                         operator,
                         requests_rx,
@@ -149,6 +161,7 @@ impl State for WaitingForOperator {
 
         debug!("moving to ready");
         Box::new(Ready {
+            endpoint_config,
             position,
 
             store,
@@ -168,6 +181,8 @@ impl State for WaitingForOperator {
 }
 
 pub struct Ready {
+    endpoint_config: EndpointConfig,
+
     position: Position<SharedImpl>,
 
     store: Store,
@@ -188,6 +203,7 @@ pub struct Ready {
 impl State for Ready {
     fn next(self: Box<Self>) -> Box<dyn State> {
         let Self {
+            endpoint_config,
             position,
             mut store,
             mut not_ready,
@@ -241,7 +257,14 @@ impl State for Ready {
         match oper.index() {
             i if i == operator_id => {
                 trace!("got operator message");
-                let system = oper.recv(&operator_rx).expect("recv");
+                let Ok(system) = oper.recv(&operator_rx) else {
+                    return Box::new(Init {
+                        store,
+                        requests_rx,
+                        outgoing_pool,
+                        endpoint_config,
+                    });
+                };
                 trace!("got system packet: {:?}", system);
                 match system {
                     System::Ping(ping) => {
@@ -256,6 +279,7 @@ impl State for Ready {
                             .expect("operator ack");
 
                         return Box::new(Update {
+                            endpoint_config,
                             last_position: position,
                             new_position,
                             store,
@@ -330,6 +354,7 @@ impl State for Ready {
                         if outgoing_tx.send(request.into()).is_err() {
                             warn!("failed to send request to next node");
                             return Box::new(WaitingForOperator {
+                                endpoint_config,
                                 store,
                                 operator,
                                 requests_rx,
@@ -347,6 +372,7 @@ impl State for Ready {
         }
 
         Box::new(Ready {
+            endpoint_config,
             position,
             store,
             pending,
@@ -362,6 +388,8 @@ impl State for Ready {
 }
 
 pub struct Update {
+    endpoint_config: EndpointConfig,
+
     last_position: Position<SharedImpl>,
     new_position: Position<SharedImpl>,
 
@@ -381,6 +409,7 @@ pub struct Update {
 impl State for Update {
     fn next(self: Box<Self>) -> Box<dyn State> {
         let Self {
+            endpoint_config,
             last_position,
             new_position,
 
@@ -398,6 +427,7 @@ impl State for Update {
 
         if last_position == new_position {
             Box::new(Ready {
+                endpoint_config,
                 position: new_position,
                 store,
                 not_ready: Default::default(),
@@ -441,6 +471,7 @@ impl State for Update {
                     Err(err) => {
                         warn!("failed to create outgoing to {:?}: {}", outgoing_addr, err);
                         return Box::new(WaitingForOperator {
+                            endpoint_config,
                             store,
                             operator,
                             requests_rx,
@@ -455,6 +486,7 @@ impl State for Update {
             if matches!(new_position, Position::Candidate) {
                 trace!("moving to transfer");
                 Box::new(Transfer {
+                    endpoint_config,
                     store,
                     operator,
                     ack_rx,
@@ -469,6 +501,7 @@ impl State for Update {
                 // Outgoing loop should at least be paused?
                 // If there are changes we might need to close the outgoing loop and start a new one.
                 Box::new(Ready {
+                    endpoint_config,
                     position: new_position,
                     store,
                     not_ready: Default::default(),
@@ -486,6 +519,8 @@ impl State for Update {
 }
 
 pub struct Transfer {
+    endpoint_config: EndpointConfig,
+
     store: Store,
 
     operator: OperatorConnection,
@@ -501,6 +536,7 @@ pub struct Transfer {
 impl State for Transfer {
     fn next(self: Box<Self>) -> Box<dyn State> {
         let Self {
+            endpoint_config,
             store,
             operator,
             ack_rx,
@@ -521,6 +557,7 @@ impl State for Transfer {
             let mut owned = outgoing_pool.acquire().expect("acquire");
 
             Box::new(Ready {
+                endpoint_config,
                 position: Position::Middle {
                     next: ByteStr::from_owned(&outgoing.addr, &mut owned).expect("valid addr"),
                 },
@@ -536,6 +573,7 @@ impl State for Transfer {
             })
         } else {
             Box::new(Ready {
+                endpoint_config,
                 position: Position::Tail { candidate: None },
                 store,
                 not_ready: Default::default(),
@@ -680,7 +718,7 @@ impl OperatorConnection {
                     }
                     i if i == kill_rx_id => {
                         debug!("write got kill signal");
-                        operator_write.shutdown(Shutdown::Both).expect("shutdown");
+                        let _ = operator_write.shutdown(Shutdown::Both);
                         break;
                     }
                     _ => {

@@ -36,7 +36,7 @@ spec:
               memory: "256Mi"
               cpu: "500m"
           ports:
-              - containerPort: 6666
+              - containerPort: 666
       volumes:
         - name: backend-config
           configMap:

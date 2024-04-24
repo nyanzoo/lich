@@ -5,8 +5,8 @@ backend:
   logLevel: trace
   config: |
     [endpoints]
-    port=6666
-    operator_addr='operator-0.operator.default.svc.cluster.local:6666'
+    port=666
+    operator_addr='operator-0.operator.default.svc.cluster.local:666'
 
     [store]
     path = '/opt/lich/store'
@@ -33,8 +33,8 @@ frontend:
   logLevel: trace
   config: |
     [endpoints]
-    port=6666
-    operator_addr='operator-0.operator.default.svc.cluster.local:6666'
+    port=666
+    operator_addr='operator-0.operator.default.svc.cluster.local:666'
 
     [incoming_pool]
     block_size = 4096
@@ -48,4 +48,4 @@ operator:
   imagePullPolicy: IfNotPresent
   logLevel: debug
   config: |
-    port=6666
+    port=666

@@ -1,0 +1,14 @@
+version: 3
+
+tasks:
+  clippy:
+    cmds:
+      - cargo clippy --all-targets --all-features -- -D warnings
+
+  test:
+    cmds:
+      - cargo test --all-targets --all-features
+
+  update-deps:
+    cmds:
+      - cargo update
