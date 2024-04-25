@@ -537,7 +537,7 @@ dependencies = [
 [[package]]
 name = "phylactery"
 version = "0.1.0"
-source = "git+https://github.com/nyanzoo/phylactery?branch=develop#0bd8f01d7094ea8589568b385efa47da885ea925"
+source = "git+https://github.com/nyanzoo/phylactery?branch=develop#f3215cfabf05f9bb804ff06436497552e0eb1270"
 dependencies = [
  "crc32fast",
  "log",
