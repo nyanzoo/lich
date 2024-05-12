@@ -64,11 +64,11 @@ fn run(host: String, port: u16, scenario: Scenario) {
             let time_to_send = Instant::now();
             for i in 0..count {
                 let key = key_set[i % key_set.len()].clone();
-                let mut owned = pool.acquire().expect("pool.acquire");
+                let mut owned = pool.acquire("bench").expect("pool.acquire");
                 let key = ByteStr::from_owned(key, &mut owned).expect("key");
                 // generate random value
                 let value = generate_random_bytes(value_size);
-                let mut owned = pool.acquire().expect("pool.acquire");
+                let mut owned = pool.acquire("bench").expect("pool.acquire");
                 let value = BinaryData::from_owned(value, &mut owned).expect("value");
                 let uuid = Uuid::new_v4().as_u128();
                 packet_tracker.insert(necronomicon::Uuid::from(uuid));
@@ -80,7 +80,7 @@ fn run(host: String, port: u16, scenario: Scenario) {
 
             let time_to_receive = Instant::now();
             for _ in 0..count {
-                let mut buffer = pool.acquire().expect("pool.acquire");
+                let mut buffer = pool.acquire("bench").expect("pool.acquire");
                 let response = full_decode(&mut stream, &mut buffer, None).unwrap();
                 let Packet::PutAck(response) = response else {
                     panic!("received unexpected response: {:?}", response);
@@ -104,7 +104,7 @@ fn run(host: String, port: u16, scenario: Scenario) {
             let mut rng = rand::thread_rng();
             for i in 0..count {
                 let key = key_set[i % key_set.len()].clone();
-                let mut owned = pool.acquire().expect("pool.acquire");
+                let mut owned = pool.acquire("bench").expect("pool.acquire");
                 let key = ByteStr::from_owned(key, &mut owned).expect("key");
                 // generate random value
                 let uuid = Uuid::new_v4().as_u128();
@@ -112,7 +112,7 @@ fn run(host: String, port: u16, scenario: Scenario) {
                 let chance = rng.gen_range(0.0..=1.0);
                 if distribution > chance {
                     let value = generate_random_bytes(value_size);
-                    let mut owned = pool.acquire().expect("pool.acquire");
+                    let mut owned = pool.acquire("bench").expect("pool.acquire");
                     let value = BinaryData::from_owned(value, &mut owned).expect("value");
                     let packet = Put::new(1, uuid, key.inner().clone(), value);
                     packet.encode(&mut stream).unwrap();
@@ -127,7 +127,7 @@ fn run(host: String, port: u16, scenario: Scenario) {
             let time_to_receive = Instant::now();
             for i in 0..count {
                 println!("acquire");
-                let mut buffer = pool.acquire().expect("pool.acquire");
+                let mut buffer = pool.acquire("bench").expect("pool.acquire");
                 println!("i: {:?}", i);
                 let response = full_decode(&mut stream, &mut buffer, None).unwrap();
                 println!("response: {:?}", response);

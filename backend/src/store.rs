@@ -24,7 +24,7 @@ use phylactery::{
 use requests::ClientRequest;
 use util::megabytes;
 
-use crate::error::Error;
+use crate::{error::Error, BufferOwner};
 
 #[derive(Clone, Debug)]
 enum CommitStatus {
@@ -107,7 +107,9 @@ impl Store {
         // NOTE: we might want to consider not storing the version this way.
         // As it prohibits the user from using this key.
 
-        let mut buffer = pool.acquire().expect("acquire buffer");
+        let mut buffer = pool
+            .acquire(BufferOwner::StoreVersion)
+            .expect("acquire buffer");
         let store_version = kvs
             .get(
                 &Self::version_key(&mut buffer).expect("store version"),
@@ -375,10 +377,14 @@ impl Store {
                 file.seek(SeekFrom::Start(off)).expect("seek file");
 
                 // using two buffers like this is wasteful, but it is easy for now.
-                let mut buffer = pool.acquire().expect("acquire buffer");
+                let mut buffer = pool
+                    .acquire(BufferOwner::DeconstructPath)
+                    .expect("acquire buffer");
                 let path = ByteStr::from_owned(path, &mut buffer).expect("buffer");
 
-                let mut buffer = pool.acquire().expect("acquire buffer");
+                let mut buffer = pool
+                    .acquire(BufferOwner::DeconstructContent)
+                    .expect("acquire buffer");
 
                 let mut unfilled = buffer.unfilled();
                 let bytes = file.read(&mut unfilled).expect("read file");
@@ -492,7 +498,7 @@ mod tests {
         let mut results = vec![];
         // Get acks in reverse to show we still get the correct packets
         for id in patches.iter().rev().map(|patch| patch.id()) {
-            let mut buf = pool.acquire().expect("acquire buffer");
+            let mut buf = pool.acquire("commit").expect("acquire buffer");
             let packets = store.commit_pending(id, &mut buf);
             results.extend(packets);
         }

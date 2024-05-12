@@ -12,7 +12,7 @@ use requests::ClientResponse;
 use necronomicon::{full_decode, Encode, Packet, Pool, PoolImpl, SharedImpl};
 use net::stream::TcpStream;
 
-use crate::error::Error;
+use crate::{error::Error, BufferOwner};
 
 // Needs to be created by receiving an update from operator, which means `state.rs`
 // needs to be able to create `Outgoing` and start it and kill it.
@@ -131,7 +131,7 @@ impl Outgoing {
 
                 let mut previous_decoded_header = None;
                 'pool: loop {
-                    let mut buffer = pool.acquire().expect("pool.acquire");
+                    let mut buffer = pool.acquire(BufferOwner::FullDecode).expect("pool.acquire");
                     'decode: loop {
                         match full_decode(&mut read, &mut buffer, previous_decoded_header.take()) {
                             Ok(packet) => {

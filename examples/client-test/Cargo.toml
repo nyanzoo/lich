@@ -12,4 +12,4 @@ serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
 uuid = { workspace = true, features = ["serde", "v4"] }
 
-necronomicon = { workspace = true }
+necronomicon = { workspace = true, features = ["test"] }

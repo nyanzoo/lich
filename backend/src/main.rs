@@ -15,6 +15,30 @@ mod store;
 
 const CONFIG: &str = "/etc/lich/lich.toml";
 
+enum BufferOwner {
+    DeconstructPath,
+    DeconstructContent,
+    Join,
+    OperatorFullDecode,
+    Position,
+    StoreCommit,
+    StoreVersion,
+}
+
+impl necronomicon::BufferOwner for BufferOwner {
+    fn why(&self) -> String {
+        match self {
+            BufferOwner::DeconstructPath => "deconstruct path".to_owned(),
+            BufferOwner::DeconstructContent => "deconstruct content".to_owned(),
+            BufferOwner::Join => "join".to_owned(),
+            BufferOwner::OperatorFullDecode => "operator full decode".to_owned(),
+            BufferOwner::Position => "position".to_owned(),
+            BufferOwner::StoreCommit => "store commit".to_owned(),
+            BufferOwner::StoreVersion => "store version".to_owned(),
+        }
+    }
+}
+
 // INCOMING:
 // Incoming will need to have tx+rx for requests and acks.
 // Incoming will read in a request and send it over to state for processing.

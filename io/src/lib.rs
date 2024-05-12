@@ -7,6 +7,18 @@ pub mod error;
 pub mod incoming;
 pub mod outgoing;
 
+enum BufferOwner {
+    FullDecode,
+}
+
+impl necronomicon::BufferOwner for BufferOwner {
+    fn why(&self) -> String {
+        match self {
+            BufferOwner::FullDecode => "full packet decode".to_owned(),
+        }
+    }
+}
+
 pub fn decode_packet_on_reader_and<P, F>(reader: &mut SessionReader, pool: &P, mut service: F)
 where
     P: Pool,
@@ -15,7 +27,7 @@ where
     let mut previous_decoded_header = None;
 
     'pool: loop {
-        let buffer = pool.acquire();
+        let buffer = pool.acquire(BufferOwner::FullDecode);
         match buffer {
             Ok(mut buffer) => {
                 'decode: loop {

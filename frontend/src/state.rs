@@ -20,6 +20,8 @@ use necronomicon::{
 use net::stream::{RetryConsistent, TcpStream};
 use requests::{ClientResponse, PendingRequest, ProcessRequest, System};
 
+use crate::BufferOwner;
+
 const CHANNEL_CAPACITY: usize = 1024;
 
 pub trait State {
@@ -569,7 +571,9 @@ impl OperatorConnection {
         let read_pool = pool.clone();
 
         let read = std::thread::spawn(move || {
-            let mut owned = read_pool.acquire().expect("acquire");
+            let mut owned = read_pool
+                .acquire(BufferOwner::OperatorFullDecode)
+                .expect("acquire");
             let packet = full_decode(&mut operator_read, &mut owned, None).expect("decode");
 
             let System::JoinAck(ack) = System::from(packet.clone()) else {
@@ -580,7 +584,9 @@ impl OperatorConnection {
 
             // Get the `Report` from operator.
             let report = loop {
-                let mut owned = read_pool.acquire().expect("acquire");
+                let mut owned = read_pool
+                    .acquire(BufferOwner::OperatorFullDecode)
+                    .expect("acquire");
                 match full_decode(&mut operator_read, &mut owned, None) {
                     Ok(packet) => {
                         let operator_msg = System::from(packet);
@@ -603,7 +609,9 @@ impl OperatorConnection {
             state_tx.send(report).expect("send report");
 
             loop {
-                let mut owned = read_pool.acquire().expect("acquire");
+                let mut owned = read_pool
+                    .acquire(BufferOwner::OperatorFullDecode)
+                    .expect("acquire");
                 match full_decode(&mut operator_read, &mut owned, None) {
                     Ok(packet) => {
                         let operator_msg = System::from(packet);
@@ -627,7 +635,7 @@ impl OperatorConnection {
 
             debug!("got fqdn: {}", fqdn);
 
-            let mut owned = pool.acquire().expect("acquire");
+            let mut owned = pool.acquire(BufferOwner::Join).expect("acquire");
             // TODO:
             // We will likely pick to use the same port for each BE node.
             // But we need a way to identify each node.

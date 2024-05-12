@@ -20,7 +20,7 @@ use necronomicon::{
 use net::stream::{RetryConsistent, TcpStream};
 use requests::{ClientRequest, ClientResponse, PendingRequest, ProcessRequest, System};
 
-use crate::store::Store;
+use crate::{store::Store, BufferOwner};
 
 const CHANNEL_CAPACITY: usize = 1024;
 
@@ -219,7 +219,9 @@ impl State for Ready {
         trace!("processing not ready requests");
         for prequest in not_ready.drain(..) {
             if let Position::Tail { .. } = position {
-                let mut buffer = outgoing_pool.acquire().expect("acquire");
+                let mut buffer = outgoing_pool
+                    .acquire(BufferOwner::StoreCommit)
+                    .expect("acquire");
 
                 let (request, pending) = prequest.into_parts();
                 let response = store.commit_patch(request, &mut buffer);
@@ -305,7 +307,9 @@ impl State for Ready {
                     trace!("got ack: {:?}", response);
 
                     let id = response.header().uuid;
-                    let mut buffer = outgoing_pool.acquire().expect("acquire");
+                    let mut buffer = outgoing_pool
+                        .acquire(BufferOwner::StoreCommit)
+                        .expect("acquire");
                     // TODO: maybe take from config?
                     for packet in store.commit_pending(id, &mut buffer) {
                         let id = packet.header().uuid;
@@ -336,7 +340,9 @@ impl State for Ready {
                         pending.complete(ClientResponse::Transfer(transfer.ack()));
                     }
                     Position::Tail { .. } => {
-                        let mut buffer = outgoing_pool.acquire().expect("acquire");
+                        let mut buffer = outgoing_pool
+                            .acquire(BufferOwner::StoreCommit)
+                            .expect("acquire");
 
                         let (request, pending) = prequest.into_parts();
                         trace!("committing patch {request:?}, since we are tail");
@@ -554,7 +560,9 @@ impl State for Transfer {
                 outgoing_tx.send(Packet::Transfer(transfer)).expect("send");
             }
 
-            let mut owned = outgoing_pool.acquire().expect("acquire");
+            let mut owned = outgoing_pool
+                .acquire(BufferOwner::Position)
+                .expect("acquire");
 
             Box::new(Ready {
                 endpoint_config,
@@ -622,7 +630,9 @@ impl OperatorConnection {
         let pool = PoolImpl::new(1024, 1024);
         let read_pool = pool.clone();
         let read = std::thread::spawn(move || {
-            let mut buffer = read_pool.acquire().expect("acquire");
+            let mut buffer = read_pool
+                .acquire(BufferOwner::OperatorFullDecode)
+                .expect("acquire");
             let packet = full_decode(&mut operator_read, &mut buffer, None).expect("decode");
 
             let System::JoinAck(ack) = System::from(packet.clone()) else {
@@ -633,7 +643,9 @@ impl OperatorConnection {
 
             // Get the `Report` from operator.
             let report = loop {
-                let mut owned = read_pool.acquire().expect("acquire");
+                let mut owned = read_pool
+                    .acquire(BufferOwner::OperatorFullDecode)
+                    .expect("acquire");
                 match full_decode(&mut operator_read, &mut owned, None) {
                     Ok(packet) => {
                         let operator_msg = System::from(packet);
@@ -657,7 +669,9 @@ impl OperatorConnection {
             state_tx.send(report).expect("send report");
 
             loop {
-                let mut owned = read_pool.acquire().expect("acquire");
+                let mut owned = read_pool
+                    .acquire(BufferOwner::OperatorFullDecode)
+                    .expect("acquire");
                 match full_decode(&mut operator_read, &mut owned, None) {
                     Ok(packet) => {
                         let operator_msg = System::from(packet);
@@ -682,7 +696,7 @@ impl OperatorConnection {
 
             debug!("got fqdn: {}", fqdn);
 
-            let mut owned = pool.acquire().expect("acquire");
+            let mut owned = pool.acquire(BufferOwner::Join).expect("acquire");
 
             // TODO:
             // We will likely pick to use the same port for each BE node.

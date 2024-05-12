@@ -13,6 +13,20 @@ mod state;
 
 const CONFIG: &str = "/etc/lich/lich.toml";
 
+enum BufferOwner {
+    Join,
+    OperatorFullDecode,
+}
+
+impl necronomicon::BufferOwner for BufferOwner {
+    fn why(&self) -> String {
+        match self {
+            BufferOwner::Join => "join".to_owned(),
+            BufferOwner::OperatorFullDecode => "operator full decode".to_owned(),
+        }
+    }
+}
+
 fn main() {
     env_logger::init();
 
