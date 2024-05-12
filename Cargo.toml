@@ -33,6 +33,7 @@ rand = "0.8"
 rayon = "1.7"
 serde = { version = "1.0" }
 tempfile = "3.2"
+testcontainers = "0.16"
 thiserror = "1.0"
 toml = "0.8"
 uuid = "1.8"

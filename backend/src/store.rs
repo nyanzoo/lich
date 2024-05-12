@@ -69,40 +69,39 @@ impl Store {
     ///
     /// # Errors
     /// See `error::Error` for details.
-    pub fn new(config: Config, pool: PoolImpl) -> Result<Self, Error> {
-        let dir_all_res = create_dir_all(&config.path);
-        trace!("creating store at {}, res {:?}", config.path, dir_all_res);
+    pub fn new(mut config: Config, pool: PoolImpl) -> Result<Self, Error> {
+        let hostname = std::env::var("HOSTNAME").expect("hostname");
+        let path = format!("{}/{}/{:?}", config.path, hostname, config.version);
+        config.path = path.clone();
+        let dir_all_res = create_dir_all(&path);
+        trace!("creating store at {}, res {:?}", path, dir_all_res);
 
-        let mmap_path = format!("{}/mmap.bin", config.path);
+        let graveyard_path = format!("{}/graveyard.bin", path);
 
         let api_version = Version::try_from(config.version).expect("valid version");
 
-        trace!("creating mmap buffer at {}", mmap_path);
-        let mmap = MmapBuffer::new(mmap_path, megabytes(1)).expect("mmap buffer");
+        trace!("creating mmap buffer at {}", graveyard_path);
+        let mmap = MmapBuffer::new(graveyard_path, megabytes(1)).expect("mmap buffer");
         trace!("create push and pop for graveyard");
         let (pusher, popper) = ring_buffer(mmap, api_version)?;
 
-        let graveyard_path = format!("{}/graveyard", config.path);
-        let graveyard_path = PathBuf::from(graveyard_path);
-        trace!("creating graveyard at {graveyard_path:?}");
-        _ = create_dir_all(&graveyard_path);
+        let data_path = format!("{}/data", path);
+        let data_path = PathBuf::from(data_path);
+        _ = create_dir_all(&data_path);
 
-        let graveyard = Graveyard::new(graveyard_path, popper);
+        let graveyard = Graveyard::new(path.clone().into(), popper);
 
         std::thread::spawn(move || {
             trace!("starting graveyard");
             graveyard.bury(10);
         });
 
-        let meta_path = format!("{}/meta.bin", config.path);
-        let data_path = format!("{}/kvdata", config.path);
-        let tl_path = format!("{}/tl.bin", config.path);
+        let tl_path = format!("{}/tl.bin", path);
         trace!("creating transaction log at {}", tl_path);
         let mmap = MmapBuffer::new(tl_path, megabytes(1))?;
 
         let (transaction_log_tx, transaction_log_rx) = ring_buffer(mmap, api_version)?;
 
-        trace!("creating kv store at {} & {}", meta_path, data_path);
         let mut kvs = KVStore::new(config.clone(), pusher)?;
 
         // NOTE: we might want to consider not storing the version this way.
@@ -128,7 +127,7 @@ impl Store {
 
         Ok(Self {
             // meta
-            root: config.path.clone(),
+            root: path.clone(),
             api_version,
             store_version,
 
@@ -196,9 +195,9 @@ impl Store {
         trace!("pushing {patch:?} to transaction log");
         while let Err(err) = self.transaction_log_tx.push(&tl_patch) {
             if let phylactery::Error::EntryTooBig { .. } = err {
-                self.transaction_log_rx
-                    .pop(buffer)
-                    .expect("must be able to pop");
+                if let Err(err) = self.transaction_log_rx.pop(buffer) {
+                    panic!("failed to pop from transaction log: {err:?}");
+                }
             } else {
                 warn!("failed to push to transaction log: {}", err);
                 return patch.nack(FAILED_TO_PUSH_TO_TRANSACTION_LOG);

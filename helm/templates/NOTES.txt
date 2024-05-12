@@ -6,3 +6,4 @@ BUGS:
 - We get crash on sends for channels because the receiver drops and that seems to be caused due to connection failure.
   So, we need to make that more robust.
 - Sometimes after a deployment the services don't connect to form a chain with `error failed to lookup address information: Name or service not known`
+- Adding buffer pools seems to lead to things getting stuck when we run out of buffer, so we need to fix that.
