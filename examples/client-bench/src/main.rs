@@ -125,12 +125,10 @@ fn run(host: String, port: u16, scenario: Scenario) {
             println!("time to send: {:?}", time_to_send.elapsed());
 
             let time_to_receive = Instant::now();
-            for i in 0..count {
-                println!("acquire");
+            for _ in 0..count {
                 let mut buffer = pool.acquire("bench").expect("pool.acquire");
-                println!("i: {:?}", i);
+
                 let response = full_decode(&mut stream, &mut buffer, None).unwrap();
-                println!("response: {:?}", response);
                 match response {
                     Packet::PutAck(response) => {
                         if !packet_tracker.remove(&response.header().uuid) {

@@ -4,6 +4,7 @@ tasks:
   put:
     cmds:
       - cargo run --release -- -H 127.0.0.1 -p 666 put-only --key-set cat --value-size 128 --count 1000000
+      # OOM at 1 million
 
   put_and_get:
     cmds:

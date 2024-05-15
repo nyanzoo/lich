@@ -7,6 +7,7 @@ version = "0.1.0"
 
 [dependencies]
 crossbeam = { workspace = true }
+dhat = { workspace = true, optional = true }
 env_logger = { workspace = true }
 hashlink = { workspace = true }
 log = { workspace = true }
@@ -29,3 +30,11 @@ phylactery = { workspace = true }
 tempfile = { workspace = true }
 
 necronomicon = { workspace = true, features = ["test"] }
+
+# Enable with dhat for memory profiling
+# [profile.release]
+# debug = 1
+
+[features]
+default = []
+dhat_heap = ["dhat"]

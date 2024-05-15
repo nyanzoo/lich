@@ -12,9 +12,9 @@ enum BufferOwner {
 }
 
 impl necronomicon::BufferOwner for BufferOwner {
-    fn why(&self) -> String {
+    fn why(&self) -> &'static str {
         match self {
-            BufferOwner::FullDecode => "full packet decode".to_owned(),
+            BufferOwner::FullDecode => "full packet decode",
         }
     }
 }

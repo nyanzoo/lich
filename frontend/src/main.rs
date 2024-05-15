@@ -19,10 +19,10 @@ enum BufferOwner {
 }
 
 impl necronomicon::BufferOwner for BufferOwner {
-    fn why(&self) -> String {
+    fn why(&self) -> &'static str {
         match self {
-            BufferOwner::Join => "join".to_owned(),
-            BufferOwner::OperatorFullDecode => "operator full decode".to_owned(),
+            BufferOwner::Join => "join",
+            BufferOwner::OperatorFullDecode => "operator full decode",
         }
     }
 }

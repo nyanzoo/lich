@@ -6,7 +6,7 @@ use std::{
 };
 
 use crossbeam::channel::{Receiver, Sender};
-use log::{debug, info, trace};
+use log::{debug, error, info, trace};
 use requests::ClientResponse;
 
 use necronomicon::{full_decode, Encode, Packet, Pool, PoolImpl, SharedImpl};
@@ -35,9 +35,9 @@ impl Debug for Outgoing {
 impl Drop for Outgoing {
     fn drop(&mut self) {
         info!("dropping outgoing");
-        self.stream
-            .shutdown(std::net::Shutdown::Both)
-            .expect("shutdown");
+        if let Err(err) = self.stream.shutdown(std::net::Shutdown::Both) {
+            error!("failed to shutdown outgoing: {err}");
+        }
     }
 }
 

@@ -7,7 +7,7 @@ use std::{
 };
 
 use crossbeam::channel::{bounded, Receiver, Select, Sender};
-use log::{debug, info, trace, warn};
+use log::{debug, error, info, trace, warn};
 use uuid::Uuid;
 
 use config::EndpointConfig;
@@ -303,7 +303,16 @@ impl State for Ready {
                 trace!("got ack");
                 // only get acks if we are not tail
                 if let Some(ack_rx) = ack_rx.as_ref() {
-                    let response = oper.recv(ack_rx).expect("recv");
+                    let Ok(response) = oper.recv(ack_rx) else {
+                        return Box::new(WaitingForOperator {
+                            endpoint_config,
+                            store,
+                            operator,
+                            requests_rx,
+                            outgoing_pool,
+                        });
+                    };
+
                     trace!("got ack: {:?}", response);
 
                     let id = response.header().uuid;
@@ -323,7 +332,15 @@ impl State for Ready {
             }
             i if i == request_rx_id => {
                 trace!("got client request");
-                let prequest = oper.recv(&requests_rx).expect("recv");
+                let Ok(prequest) = oper.recv(&requests_rx) else {
+                    return Box::new(WaitingForOperator {
+                        endpoint_config,
+                        store,
+                        operator,
+                        requests_rx,
+                        outgoing_pool,
+                    });
+                };
                 trace!("got request: {:?}", prequest);
 
                 match position {
@@ -724,12 +741,16 @@ impl OperatorConnection {
 
                 let oper = sel.select();
                 match oper.index() {
-                    i if i == state_rx_id => {
-                        let system: System<_> = oper.recv(&state_rx).expect("recv");
-                        trace!("got system packet: {:?}", system);
-                        system.encode(&mut operator_write).expect("encode");
-                        operator_write.flush().expect("flush");
-                    }
+                    i if i == state_rx_id => match oper.recv::<System<_>>(&state_rx) {
+                        Ok(system) => {
+                            trace!("got system packet: {:?}", system);
+                            system.encode(&mut operator_write).expect("encode");
+                            operator_write.flush().expect("flush");
+                        }
+                        Err(err) => {
+                            error!("state_rx err: {}", err);
+                        }
+                    },
                     i if i == kill_rx_id => {
                         debug!("write got kill signal");
                         let _ = operator_write.shutdown(Shutdown::Both);

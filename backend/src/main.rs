@@ -13,6 +13,10 @@ mod error;
 mod state;
 mod store;
 
+#[cfg(feature = "dhat_heap")]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
+
 const CONFIG: &str = "/etc/lich/lich.toml";
 
 enum BufferOwner {
@@ -26,15 +30,15 @@ enum BufferOwner {
 }
 
 impl necronomicon::BufferOwner for BufferOwner {
-    fn why(&self) -> String {
+    fn why(&self) -> &'static str {
         match self {
-            BufferOwner::DeconstructPath => "deconstruct path".to_owned(),
-            BufferOwner::DeconstructContent => "deconstruct content".to_owned(),
-            BufferOwner::Join => "join".to_owned(),
-            BufferOwner::OperatorFullDecode => "operator full decode".to_owned(),
-            BufferOwner::Position => "position".to_owned(),
-            BufferOwner::StoreCommit => "store commit".to_owned(),
-            BufferOwner::StoreVersion => "store version".to_owned(),
+            BufferOwner::DeconstructPath => "deconstruct path",
+            BufferOwner::DeconstructContent => "deconstruct content",
+            BufferOwner::Join => "join",
+            BufferOwner::OperatorFullDecode => "operator full decode",
+            BufferOwner::Position => "position",
+            BufferOwner::StoreCommit => "store commit",
+            BufferOwner::StoreVersion => "store version",
         }
     }
 }
@@ -53,6 +57,11 @@ impl necronomicon::BufferOwner for BufferOwner {
 // Outgoing will need to have tx+rx for requests and acks. It sends out operator msgs to operator. The rest to next node.
 // Need to read out responses and send acks back to STATE.
 fn main() {
+    #[cfg(feature = "dhat_heap")]
+    let profiler = profiler();
+    #[cfg(feature = "dhat_heap")]
+    let now = std::time::Instant::now();
+
     env_logger::init();
 
     info!("starting lich(backend) version 0.0.1");
@@ -81,8 +90,26 @@ fn main() {
     );
     let mut state = Init::init(config.endpoints, store, requests_rx, outgoing_pool);
 
+    #[cfg(feature = "dhat_heap")]
+    let _ = std::thread::spawn(move || loop {
+        let elapsed = now.elapsed();
+        log::trace!("elapsed: {}", elapsed.as_secs());
+        if elapsed.as_secs() > 180 {
+            log::error!("collecting dhat profile");
+            drop(profiler);
+            return;
+        }
+    });
+
     trace!("starting state");
     loop {
         state = state.next();
     }
+}
+
+#[cfg(feature = "dhat_heap")]
+fn profiler() -> dhat::Profiler {
+    let file_name = "/opt/lich/backend.json";
+    let profiler = dhat::Profiler::builder().file_name(file_name).build();
+    profiler
 }

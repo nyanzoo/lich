@@ -1,7 +1,7 @@
-FROM rust AS chef 
-# We only pay the installation cost once, 
+FROM rust AS chef
+# We only pay the installation cost once,
 # it will be cached from the second build onwards
-RUN cargo install cargo-chef 
+RUN cargo install cargo-chef
 WORKDIR /app
 
 FROM chef AS planner
