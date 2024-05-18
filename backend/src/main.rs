@@ -20,10 +20,6 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 
 const CONFIG: &str = "/etc/lich/lich.toml";
 
-#[cfg(feature = "dhat")]
-#[global_allocator]
-static ALLOC: dhat::Alloc = dhat::Alloc;
-
 enum BufferOwner {
     DeconstructPath,
     DeconstructContent,
