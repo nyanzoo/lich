@@ -20,6 +20,10 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 
 const CONFIG: &str = "/etc/lich/lich.toml";
 
+#[cfg(feature = "dhat")]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
+
 enum BufferOwner {
     DeconstructPath,
     DeconstructContent,
@@ -64,6 +68,9 @@ fn main() {
     let now = std::time::Instant::now();
 
     init_logger!();
+
+    #[cfg(feature = "dhat")]
+    let _profiler = dhat::Profiler::new_heap();
 
     info!("starting lich(backend) version 0.0.1");
     let contents = std::fs::read_to_string(CONFIG).expect("read config");
