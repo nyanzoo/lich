@@ -7,7 +7,6 @@ version = "0.1.0"
 
 [dependencies]
 crossbeam = { workspace = true }
-env_logger = { workspace = true }
 log = { workspace = true }
 parking_lot = { workspace = true }
 rayon = { workspace = true }
@@ -17,6 +16,7 @@ toml = { workspace = true }
 
 config = { path = "../config" }
 io = { path = "../io" }
+logger = { path = "../logger" }
 net = { path = "../net" }
 requests = { path = "../requests" }
 

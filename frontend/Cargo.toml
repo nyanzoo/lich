@@ -7,7 +7,6 @@ version = "0.1.0"
 
 [dependencies]
 crossbeam = { workspace = true }
-env_logger = { workspace = true }
 log = { workspace = true }
 rayon = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
@@ -18,6 +17,7 @@ uuid = { workspace = true, features = ["serde", "v4"] }
 config = { path = "../config" }
 net = { path = "../net" }
 io = { path = "../io" }
+logger = { path = "../logger" }
 requests = { path = "../requests" }
 
 necronomicon = { workspace = true, branch = "develop" }

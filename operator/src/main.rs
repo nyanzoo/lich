@@ -5,6 +5,7 @@ use rayon::ThreadPoolBuilder;
 
 use config::OperatorConfig;
 use io::decode_packet_on_reader_and;
+use logger::init_logger;
 use necronomicon::{PoolImpl, SharedImpl};
 use net::{session::Session, stream::TcpListener};
 use requests::System;
@@ -18,7 +19,7 @@ mod operator;
 const CONFIG: &str = "/etc/lich/lich.toml";
 
 fn main() {
-    env_logger::init();
+    init_logger!();
 
     info!("starting lich(operator) version 0.0.1");
     let contents = std::fs::read_to_string(CONFIG).expect("read config");

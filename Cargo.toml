@@ -5,6 +5,7 @@ members = [
     "config",
     "frontend",
     "io",
+    "logger",
     "net",
     "operator",
     "requests",
@@ -24,16 +25,22 @@ phylactery = { git = "https://github.com/nyanzoo/phylactery", branch = "develop"
 clap = "4"
 crossbeam = "0.8"
 dhat = "0.3"
-env_logger = "0.11"
+env_logger = "0.8"
 hashlink = "0.9"
 lazy_static = "1.4"
 log = "0.4"
 matches = "0.1"
+opentelemetry = "0"
+opentelemetry-appender-log = "0"
+opentelemetry_sdk = "0"
+opentelemetry-semantic-conventions = "0"
+opentelemetry-stdout = { version = "0", features = ["trace"] }
 parking_lot = "0.12"
 rand = "0.8"
-rayon = "1.7"
+rayon = "1.10"
 serde = { version = "1.0" }
-tempfile = "3.2"
+syslog = "6"
+tempfile = "3.10"
 testcontainers = "0.16"
 thiserror = "1.0"
 toml = "0.8"

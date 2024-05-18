@@ -5,6 +5,7 @@ use log::info;
 
 use config::FrontendConfig;
 use io::incoming::Incoming;
+use logger::init_logger;
 use necronomicon::PoolImpl;
 
 use crate::state::{Init, State};
@@ -28,7 +29,7 @@ impl necronomicon::BufferOwner for BufferOwner {
 }
 
 fn main() {
-    env_logger::init();
+    init_logger!();
 
     info!("starting lich(frontend) version 0.0.1");
     let contents = std::fs::read_to_string(CONFIG).expect("read config");

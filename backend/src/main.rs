@@ -5,6 +5,7 @@ use log::{info, trace};
 
 use config::BackendConfig;
 use io::incoming::Incoming;
+use logger::init_logger;
 use necronomicon::PoolImpl;
 
 use crate::{state::Init, store::Store};
@@ -62,7 +63,7 @@ fn main() {
     #[cfg(feature = "dhat_heap")]
     let now = std::time::Instant::now();
 
-    env_logger::init();
+    init_logger!();
 
     info!("starting lich(backend) version 0.0.1");
     let contents = std::fs::read_to_string(CONFIG).expect("read config");
