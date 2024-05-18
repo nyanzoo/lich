@@ -45,10 +45,14 @@ pub mod simple {
     #[macro_export]
     macro_rules! init_logger {
         () => {
-            use env_logger;
+            use logger::simple::create_logger;
 
-            env_logger::init();
+            create_logger();
         };
+    }
+
+    pub fn create_logger() {
+        env_logger::init();
     }
 }
 
