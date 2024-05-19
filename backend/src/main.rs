@@ -65,9 +65,6 @@ fn main() {
 
     init_logger!();
 
-    #[cfg(feature = "dhat")]
-    let _profiler = dhat::Profiler::new_heap();
-
     info!("starting lich(backend) version 0.0.1");
     let contents = std::fs::read_to_string(CONFIG).expect("read config");
     let config = toml::from_str::<BackendConfig>(&contents).expect("valid config");
