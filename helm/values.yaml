@@ -2,7 +2,7 @@ backend:
   image: backend
   imagePullPolicy: IfNotPresent
   replicas: 3
-  logLevel: trace
+  logLevel: info
   config: |
     [endpoints]
     port=666
@@ -30,7 +30,7 @@ frontend:
   image: frontend
   imagePullPolicy: IfNotPresent
   replicas: 3
-  logLevel: trace
+  logLevel: info
   config: |
     [endpoints]
     port=666

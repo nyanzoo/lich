@@ -1,9 +1,8 @@
 use std::{
     collections::BTreeMap,
-    fs::{create_dir_all, remove_dir, File},
+    fs::{remove_dir, File},
     io::{Cursor, Read, Seek, SeekFrom},
     mem::size_of,
-    path::PathBuf,
 };
 
 use hashlink::LinkedHashMap;
@@ -18,7 +17,7 @@ use phylactery::{
     buffer::MmapBuffer,
     dequeue::{self, Dequeue},
     entry::Version,
-    kv_store::{config::Config, Graveyard, Lookup, Store as KVStore},
+    kv_store::{config::Config, create_store_and_graveyar, Lookup, Store as KVStore},
     ring_buffer::{self, ring_buffer},
 };
 use requests::ClientRequest;
@@ -72,24 +71,9 @@ impl Store {
     pub fn new(mut config: Config, pool: PoolImpl) -> Result<Self, Error> {
         let hostname = std::env::var("HOSTNAME").expect("hostname");
         let path = format!("{}/{}/{:?}", config.path, hostname, config.version);
+
         config.path = path.clone();
-        let dir_all_res = create_dir_all(&path);
-        trace!("creating store at {}, res {:?}", path, dir_all_res);
-
-        let graveyard_path = format!("{}/graveyard.bin", path);
-
-        let api_version = Version::try_from(config.version).expect("valid version");
-
-        trace!("creating mmap buffer at {}", graveyard_path);
-        let mmap = MmapBuffer::new(graveyard_path, megabytes(1)).expect("mmap buffer");
-        trace!("create push and pop for graveyard");
-        let (pusher, popper) = ring_buffer(mmap, api_version)?;
-
-        let data_path = format!("{}/data", path);
-        let data_path = PathBuf::from(data_path);
-        _ = create_dir_all(&data_path);
-
-        let graveyard = Graveyard::new(path.clone().into(), popper);
+        let (mut kvs, graveyard) = create_store_and_graveyar(config.clone(), megabytes(1))?;
 
         std::thread::spawn(move || {
             trace!("starting graveyard");
@@ -100,16 +84,12 @@ impl Store {
         trace!("creating transaction log at {}", tl_path);
         let mmap = MmapBuffer::new(tl_path, megabytes(1))?;
 
-        let (transaction_log_tx, transaction_log_rx) = ring_buffer(mmap, api_version)?;
-
-        let mut kvs = KVStore::new(config.clone(), pusher)?;
+        let (transaction_log_tx, transaction_log_rx) = ring_buffer(mmap, config.version)?;
 
         // NOTE: we might want to consider not storing the version this way.
         // As it prohibits the user from using this key.
 
-        let mut buffer = pool
-            .acquire(BufferOwner::StoreVersion)
-            .expect("acquire buffer");
+        let mut buffer = pool.acquire(BufferOwner::StoreVersion);
         let store_version = kvs
             .get(
                 &Self::version_key(&mut buffer).expect("store version"),
@@ -129,8 +109,8 @@ impl Store {
 
         Ok(Self {
             // meta
-            root: path.clone(),
-            api_version,
+            root: config.path.clone(),
+            api_version: config.version,
             store_version,
 
             // patches
@@ -377,14 +357,10 @@ impl Store {
                 file.seek(SeekFrom::Start(off)).expect("seek file");
 
                 // using two buffers like this is wasteful, but it is easy for now.
-                let mut buffer = pool
-                    .acquire(BufferOwner::DeconstructPath)
-                    .expect("acquire buffer");
+                let mut buffer = pool.acquire(BufferOwner::DeconstructPath);
                 let path = ByteStr::from_owned(path, &mut buffer).expect("buffer");
 
-                let mut buffer = pool
-                    .acquire(BufferOwner::DeconstructContent)
-                    .expect("acquire buffer");
+                let mut buffer = pool.acquire(BufferOwner::DeconstructContent);
 
                 let mut unfilled = buffer.unfilled();
                 let bytes = file.read(&mut unfilled).expect("read file");
@@ -498,7 +474,7 @@ mod tests {
         let mut results = vec![];
         // Get acks in reverse to show we still get the correct packets
         for id in patches.iter().rev().map(|patch| patch.id()) {
-            let mut buf = pool.acquire("commit").expect("acquire buffer");
+            let mut buf = pool.acquire("commit");
             let packets = store.commit_pending(id, &mut buf);
             results.extend(packets);
         }
