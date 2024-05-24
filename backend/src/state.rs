@@ -616,7 +616,7 @@ pub struct OperatorConnection {
 
 impl Drop for OperatorConnection {
     fn drop(&mut self) {
-        self.kill_tx.send(()).expect("kill operator");
+        self.kill_tx.send(()).expect("kill");
     }
 }
 
@@ -638,6 +638,7 @@ impl OperatorConnection {
 
         let pool = PoolImpl::new(1024, 1024);
         let read_pool = pool.clone();
+        // TODO: verify that killing the threads works.
         let read = std::thread::spawn(move || {
             let mut buffer = read_pool.acquire(BufferOwner::OperatorFullDecode);
             let packet = full_decode(&mut operator_read, &mut buffer, None).expect("decode");
@@ -720,11 +721,11 @@ impl OperatorConnection {
             join.encode(&mut operator_write).expect("encode");
             operator_write.flush().expect("flush");
 
-            loop {
-                let mut sel = Select::new();
-                let state_rx_id = sel.recv(&state_rx);
-                let kill_rx_id = sel.recv(&kill_rx);
+            let mut sel = Select::new();
+            let state_rx_id = sel.recv(&state_rx);
+            let kill_rx_id = sel.recv(&kill_rx);
 
+            loop {
                 let oper = sel.select();
                 match oper.index() {
                     i if i == state_rx_id => match oper.recv::<System<_>>(&state_rx) {

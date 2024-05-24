@@ -61,6 +61,7 @@ pub mod test {
 
             [store.data]
             node_size = 1024
+            max_disk_usage = 1024
 
             [incoming_pool]
             block_size = 1024
@@ -85,7 +86,10 @@ pub mod test {
                         max_key_size: 128,
                         max_disk_usage: 1024,
                     },
-                    data: kv_store::config::Data { node_size: 1024 },
+                    data: kv_store::config::Data {
+                        node_size: 1024,
+                        max_disk_usage: 1024
+                    },
                     version: phylactery::entry::Version::V1,
                 },
                 incoming_pool: crate::PoolConfig {

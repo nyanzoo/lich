@@ -22,5 +22,5 @@ FROM debian:stable-slim AS runtime
 RUN apt-get update && apt-get install -y net-tools dnsutils netcat-openbsd
 RUN mkdir -p /opt/lich
 COPY --from=builder /app/target/release/backend /usr/local/bin
-ENV RUST_BACKTRACE=1
+ENV RUST_BACKTRACE=full
 ENTRYPOINT ["/usr/local/bin/backend"]

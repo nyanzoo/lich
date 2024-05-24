@@ -10,15 +10,13 @@ use log::{trace, warn};
 
 use necronomicon::{
     system_codec::Transfer, BinaryData, ByteStr, Decode, Encode, Owned, OwnedImpl, Packet,
-    Pool as _, PoolImpl, Shared, SharedImpl, Uuid, FAILED_TO_PUSH_TO_TRANSACTION_LOG,
-    INTERNAL_ERROR, KEY_DOES_NOT_EXIST, QUEUE_ALREADY_EXISTS, QUEUE_DOES_NOT_EXIST, QUEUE_EMPTY,
+    Pool as _, PoolImpl, Shared, SharedImpl, Uuid, INTERNAL_ERROR, KEY_DOES_NOT_EXIST,
+    QUEUE_ALREADY_EXISTS, QUEUE_DOES_NOT_EXIST, QUEUE_EMPTY,
 };
 use phylactery::{
-    buffer::MmapBuffer,
     dequeue::{self, Dequeue},
     entry::Version,
-    kv_store::{config::Config, create_store_and_graveyar, Lookup, Store as KVStore},
-    ring_buffer::{self, ring_buffer},
+    kv_store::{config::Config, create_store_and_graveyard, Lookup, Store as KVStore},
 };
 use requests::ClientRequest;
 use util::megabytes;
@@ -52,8 +50,6 @@ pub struct Store {
     store_version: u128,
     dequeues: BTreeMap<ByteStr<SharedImpl>, Dequeue>,
     pending: hashlink::LinkedHashMap<necronomicon::Uuid, CommitStatus>,
-    transaction_log_tx: ring_buffer::Pusher<MmapBuffer>,
-    transaction_log_rx: ring_buffer::Popper<MmapBuffer>,
 }
 
 impl Store {
@@ -69,22 +65,19 @@ impl Store {
     /// # Errors
     /// See `error::Error` for details.
     pub fn new(mut config: Config, pool: PoolImpl) -> Result<Self, Error> {
+        #[cfg(test)]
+        let hostname = "test";
+        #[cfg(not(test))]
         let hostname = std::env::var("HOSTNAME").expect("hostname");
         let path = format!("{}/{}/{:?}", config.path, hostname, config.version);
 
         config.path = path.clone();
-        let (mut kvs, graveyard) = create_store_and_graveyar(config.clone(), megabytes(1))?;
+        let (mut kvs, graveyard) = create_store_and_graveyard(config.clone(), megabytes(1))?;
 
         std::thread::spawn(move || {
             trace!("starting graveyard");
             graveyard.bury(10);
         });
-
-        let tl_path = format!("{}/tl.bin", path);
-        trace!("creating transaction log at {}", tl_path);
-        let mmap = MmapBuffer::new(tl_path, megabytes(1))?;
-
-        let (transaction_log_tx, transaction_log_rx) = ring_buffer(mmap, config.version)?;
 
         // NOTE: we might want to consider not storing the version this way.
         // As it prohibits the user from using this key.
@@ -115,8 +108,6 @@ impl Store {
 
             // patches
             pending: LinkedHashMap::new(),
-            transaction_log_rx,
-            transaction_log_tx,
 
             // data
             kvs,
@@ -174,18 +165,6 @@ impl Store {
         // TODO: make `push_encode`
         patch.encode(&mut tl_patch).expect("must be able to encode");
 
-        trace!("pushing {patch:?} to transaction log");
-        while let Err(err) = self.transaction_log_tx.push(&tl_patch) {
-            if let phylactery::Error::EntryTooBig { .. } = err {
-                if let Err(err) = self.transaction_log_rx.pop(buffer) {
-                    panic!("failed to pop from transaction log: {err:?}");
-                }
-            } else {
-                warn!("failed to push to transaction log: {}", err);
-                return patch.nack(FAILED_TO_PUSH_TO_TRANSACTION_LOG);
-            }
-        }
-
         let res = match patch {
             // dequeue
             ClientRequest::CreateQueue(queue) => {
@@ -197,6 +176,7 @@ impl Store {
                     match Dequeue::new(
                         format!("{}/{:?}", self.root, path),
                         queue.node_size(),
+                        queue.max_disk_usage(),
                         self.api_version,
                     ) {
                         Ok(dequeue) => {
@@ -449,7 +429,10 @@ mod tests {
                 max_disk_usage: 2048,
                 max_key_size: 128,
             },
-            data: Data { node_size: 1024 },
+            data: Data {
+                node_size: 1024,
+                max_disk_usage: 1024 * 1024,
+            },
             version: phylactery::entry::Version::V1,
         };
         let pool = PoolImpl::new(1024, 1024);

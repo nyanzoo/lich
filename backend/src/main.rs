@@ -95,7 +95,7 @@ fn main() {
     let _ = std::thread::spawn(move || loop {
         let elapsed = now.elapsed();
         log::trace!("elapsed: {}", elapsed.as_secs());
-        if elapsed.as_secs() > 180 {
+        if elapsed.as_secs() > 100 {
             log::error!("collecting dhat profile");
             drop(profiler);
             return;
@@ -110,7 +110,10 @@ fn main() {
 
 #[cfg(feature = "dhat_heap")]
 fn profiler() -> dhat::Profiler {
-    let file_name = "/opt/lich/backend.json";
+    let hostname = std::env::var("HOSTNAME").expect("hostname");
+    let path = format!("/opt/lich/dhat/{}", hostname);
+    std::fs::create_dir_all(&path).expect("create dhat dir");
+    let file_name = format!("{path}/backend.json");
     let profiler = dhat::Profiler::builder().file_name(file_name).build();
     profiler
 }

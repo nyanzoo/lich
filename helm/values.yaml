@@ -13,10 +13,11 @@ backend:
     version = 'V1'
 
     [store.meta]
-    max_disk_usage = 4096
+    max_disk_usage = 8192
     max_key_size = 128
 
     [store.data]
+    max_disk_usage = 1073741824
     node_size = 4096
 
     [incoming_pool]

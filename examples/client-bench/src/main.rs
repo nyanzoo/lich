@@ -1,4 +1,11 @@
-use std::{collections::HashSet, io::Write, net::TcpStream, println, time::Instant};
+use std::{
+    collections::{HashMap, HashSet},
+    io::Write,
+    net::TcpStream,
+    ops::AddAssign,
+    println,
+    time::Instant,
+};
 
 use clap::Parser;
 use necronomicon::{
@@ -125,17 +132,30 @@ fn run(host: String, port: u16, scenario: Scenario) {
             println!("time to send: {:?}", time_to_send.elapsed());
 
             let time_to_receive = Instant::now();
-            for _ in 0..count {
+            let mut report: HashMap<&'static str, HashMap<u8, usize>> = HashMap::new();
+            for i in 0..count {
                 let mut buffer = pool.acquire("bench");
 
                 let response = full_decode(&mut stream, &mut buffer, None).unwrap();
                 match response {
                     Packet::PutAck(response) => {
+                        report
+                            .entry("put")
+                            .or_default()
+                            .entry(response.response_code())
+                            .or_default()
+                            .add_assign(1);
                         if !packet_tracker.remove(&response.header().uuid) {
                             panic!("received unexpected response: {:?}", response);
                         }
                     }
                     Packet::GetAck(response) => {
+                        report
+                            .entry("get")
+                            .or_default()
+                            .entry(response.response_code())
+                            .or_default()
+                            .add_assign(1);
                         if !packet_tracker.remove(&response.header().uuid) {
                             panic!("received unexpected response: {:?}", response);
                         }
@@ -144,8 +164,16 @@ fn run(host: String, port: u16, scenario: Scenario) {
                         panic!("received unexpected response: {:?}", response);
                     }
                 }
+
+                if i % 1000 == 0 {
+                    println!("report: {:?}", report);
+                }
             }
-            println!("time to receive: {:?}", time_to_receive.elapsed());
+            println!(
+                "time to receive: {:?}, report {:?}",
+                time_to_receive.elapsed(),
+                report
+            );
         }
     }
     println!("elapsed: {:?}", start.elapsed());
