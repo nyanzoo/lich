@@ -7,3 +7,10 @@ BUGS:
   So, we need to make that more robust.
 - Sometimes after a deployment the services don't connect to form a chain with `error failed to lookup address information: Name or service not known`
 - Adding buffer pools seems to lead to things getting stuck when we run out of buffer, so we need to fix that.
+- currently breaking due to session in ack getting dropped which breaks everything else. Losing the session is possible, so we need to do two things:
+    - Find out why session was lost
+    - Make sure that we can recover from session loss
+
+
+- UPDATE: backend not coming up in time now after bufwriter change?
+- UPDATE: still getting live-locked?

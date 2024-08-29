@@ -8,9 +8,9 @@ version = "0.1.0"
 [dependencies]
 crossbeam = { workspace = true }
 log = { workspace = true }
-thiserror = { workspace = true }
 
 necronomicon = { workspace = true }
+phylactery = { workspace = true }
 
 [dev-dependencies]
 

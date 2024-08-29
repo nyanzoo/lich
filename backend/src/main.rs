@@ -7,12 +7,14 @@ use config::BackendConfig;
 use io::incoming::Incoming;
 use logger::init_logger;
 use necronomicon::PoolImpl;
+use phylactery::store::Store;
 
-use crate::{state::Init, store::Store};
+use crate::state::init::Init;
 
 mod error;
+mod operator_connection;
 mod state;
-mod store;
+// mod store;
 
 #[cfg(feature = "dhat_heap")]
 #[global_allocator]
@@ -20,6 +22,7 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 
 const CONFIG: &str = "/etc/lich/lich.toml";
 
+#[derive(Clone, Copy, Debug)]
 enum BufferOwner {
     DeconstructPath,
     DeconstructContent,
@@ -74,7 +77,19 @@ fn main() {
         config.incoming_pool.capacity,
     );
     // We only need a pool temporarily for the store to initialize.
-    let store = Store::new(config.store, incoming_pool.clone()).expect("store");
+    let (request_tx, request_rx) = bounded(1024);
+    let (response_tx, response_rx) = bounded(1024);
+    let store = Store::new(
+        config.stores,
+        request_rx,
+        response_tx,
+        incoming_pool.clone(),
+    )
+    .expect("store");
+    trace!("store starting");
+    _ = thread::Builder::new()
+        .name("store".to_string())
+        .spawn(move || store.run());
 
     let (requests_tx, requests_rx) = bounded(1024);
 
@@ -89,7 +104,13 @@ fn main() {
         config.outgoing_pool.block_size,
         config.outgoing_pool.capacity,
     );
-    let mut state = Init::init(config.endpoints, store, requests_rx, outgoing_pool);
+    let mut state = Init::init(
+        config.endpoints,
+        request_tx,
+        response_rx,
+        requests_rx,
+        outgoing_pool,
+    );
 
     #[cfg(feature = "dhat_heap")]
     let _ = std::thread::spawn(move || loop {

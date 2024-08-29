@@ -254,7 +254,9 @@ impl Write for TcpStream {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         let mut inner = self.inner.lock();
         let write = &mut inner.expected_write;
+        println!("writing '{buf:?}' to stream");
         write.extend_from_slice(buf);
+        println!("wrote to stream");
         Ok(buf.len())
     }
 

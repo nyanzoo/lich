@@ -4,14 +4,16 @@ use crossbeam::channel::Sender;
 use log::{trace, warn};
 
 use necronomicon::{
-    dequeue_codec::{
+    deque_codec::{
         self, Create, CreateAck, Dequeue, DequeueAck, Enqueue, EnqueueAck, Len, LenAck, Peek,
         PeekAck,
     },
     kv_store_codec::{self, Get, GetAck, Put, PutAck},
     system_codec::{Join, JoinAck, Ping, PingAck, Report, ReportAck, Transfer, TransferAck},
-    Ack, Decode, DecodeOwned, Encode, Header, Kind, Owned, Packet, PartialDecode, Shared, Uuid,
+    Ack, ByteStr, Decode, DecodeOwned, DequePacket, Encode, Header, Kind, Owned, Packet,
+    PartialDecode, Response, Shared, SharedImpl, StorePacket, SystemPacket, Uuid,
 };
+use phylactery::store::Request;
 
 #[derive(Clone, Debug)]
 pub enum System<S>
@@ -19,16 +21,34 @@ where
     S: Shared,
 {
     Join(Join<S>),
-    JoinAck(JoinAck),
+    JoinAck(JoinAck<S>),
 
-    Ping(Ping),
-    PingAck(PingAck),
+    Ping(Ping<S>),
+    PingAck(PingAck<S>),
 
     Report(Report<S>),
-    ReportAck(ReportAck),
+    ReportAck(ReportAck<S>),
 
     Transfer(Transfer<S>),
-    TransferAck(TransferAck),
+    TransferAck(TransferAck<S>),
+}
+
+impl<S> From<SystemPacket<S>> for System<S>
+where
+    S: Shared,
+{
+    fn from(value: SystemPacket<S>) -> Self {
+        match value {
+            SystemPacket::Join(packet) => System::Join(packet),
+            SystemPacket::JoinAck(packet) => System::JoinAck(packet),
+            SystemPacket::Ping(packet) => System::Ping(packet),
+            SystemPacket::PingAck(packet) => System::PingAck(packet),
+            SystemPacket::Report(packet) => System::Report(packet),
+            SystemPacket::ReportAck(packet) => System::ReportAck(packet),
+            SystemPacket::Transfer(packet) => System::Transfer(packet),
+            SystemPacket::TransferAck(packet) => System::TransferAck(packet),
+        }
+    }
 }
 
 impl<S> From<Packet<S>> for System<S>
@@ -37,18 +57,7 @@ where
 {
     fn from(value: Packet<S>) -> Self {
         match value {
-            Packet::Join(join) => System::Join(join),
-            Packet::JoinAck(join_ack) => System::JoinAck(join_ack),
-
-            Packet::Ping(ping) => System::Ping(ping),
-            Packet::PingAck(ping_ack) => System::PingAck(ping_ack),
-
-            Packet::Report(report) => System::Report(report),
-            Packet::ReportAck(report_ack) => System::ReportAck(report_ack),
-
-            Packet::Transfer(transfer) => System::Transfer(transfer),
-            Packet::TransferAck(transfer_ack) => System::TransferAck(transfer_ack),
-
+            Packet::System(system) => Self::from(system),
             _ => panic!("invalid packet type {value:?}"),
         }
     }
@@ -59,11 +68,11 @@ pub enum ClientRequest<S>
 where
     S: Shared,
 {
-    // dequeue
+    // deque
     CreateQueue(Create<S>),
-    DeleteQueue(dequeue_codec::Delete<S>),
+    DeleteQueue(deque_codec::Delete<S>),
     Enqueue(Enqueue<S>),
-    Dequeue(Dequeue<S>),
+    Deque(Dequeue<S>),
     Peek(Peek<S>),
     Len(Len<S>),
 
@@ -77,28 +86,49 @@ where
     Transfer(Transfer<S>),
 }
 
+impl From<ClientRequest<SharedImpl>> for Request {
+    fn from(value: ClientRequest<SharedImpl>) -> Self {
+        match value {
+            // deque
+            ClientRequest::CreateQueue(packet) => Request::Create(packet),
+            ClientRequest::DeleteQueue(packet) => Request::Remove(packet),
+            ClientRequest::Enqueue(packet) => Request::Push(packet),
+            ClientRequest::Deque(packet) => Request::Pop(packet),
+            ClientRequest::Peek(packet) => Request::Peek(packet),
+            // ClientRequest::Len(packet) => Request::Deque(DequeRequest::Len(packet)),
+
+            // kv store
+            ClientRequest::Put(packet) => Request::Put(packet),
+            ClientRequest::Get(packet) => Request::Get(packet),
+            ClientRequest::Delete(packet) => Request::Delete(packet),
+
+            _ => panic!("invalid packet type {value:?}"),
+        }
+    }
+}
+
 impl<S> Into<Packet<S>> for ClientRequest<S>
 where
     S: Shared,
 {
     fn into(self) -> Packet<S> {
         match self {
-            // dequeue
-            ClientRequest::CreateQueue(packet) => Packet::CreateQueue(packet),
-            ClientRequest::DeleteQueue(packet) => Packet::DeleteQueue(packet),
-            ClientRequest::Enqueue(packet) => Packet::Enqueue(packet),
-            ClientRequest::Dequeue(packet) => Packet::Dequeue(packet),
-            ClientRequest::Peek(packet) => Packet::Peek(packet),
-            ClientRequest::Len(packet) => Packet::Len(packet),
+            // deque
+            ClientRequest::CreateQueue(packet) => Packet::Deque(DequePacket::CreateQueue(packet)),
+            ClientRequest::DeleteQueue(packet) => Packet::Deque(DequePacket::DeleteQueue(packet)),
+            ClientRequest::Enqueue(packet) => Packet::Deque(DequePacket::Enqueue(packet)),
+            ClientRequest::Deque(packet) => Packet::Deque(DequePacket::Dequeue(packet)),
+            ClientRequest::Peek(packet) => Packet::Deque(DequePacket::Peek(packet)),
+            ClientRequest::Len(packet) => Packet::Deque(DequePacket::Len(packet)),
 
             // kv store
-            ClientRequest::Put(packet) => Packet::Put(packet),
-            ClientRequest::Get(packet) => Packet::Get(packet),
-            ClientRequest::Delete(packet) => Packet::Delete(packet),
+            ClientRequest::Put(packet) => Packet::Store(StorePacket::Put(packet)),
+            ClientRequest::Get(packet) => Packet::Store(StorePacket::Get(packet)),
+            ClientRequest::Delete(packet) => Packet::Store(StorePacket::Delete(packet)),
 
             // transfer
             #[cfg(feature = "backend")]
-            ClientRequest::Transfer(packet) => Packet::Transfer(packet),
+            ClientRequest::Transfer(packet) => Packet::System(SystemPacket::Transfer(packet)),
         }
     }
 }
@@ -109,11 +139,11 @@ where
 {
     pub fn id(&self) -> Uuid {
         match self {
-            // dequeue
+            // deque
             ClientRequest::CreateQueue(packet) => packet.header().uuid,
             ClientRequest::DeleteQueue(packet) => packet.header().uuid,
             ClientRequest::Enqueue(packet) => packet.header().uuid,
-            ClientRequest::Dequeue(packet) => packet.header().uuid,
+            ClientRequest::Deque(packet) => packet.header().uuid,
             ClientRequest::Peek(packet) => packet.header().uuid,
             ClientRequest::Len(packet) => packet.header().uuid,
 
@@ -130,11 +160,11 @@ where
 
     pub fn is_for_head(&self) -> bool {
         match self {
-            // dequeue
+            // deque
             ClientRequest::CreateQueue(_) => true,
             ClientRequest::DeleteQueue(_) => true,
             ClientRequest::Enqueue(_) => true,
-            ClientRequest::Dequeue(_) => true,
+            ClientRequest::Deque(_) => true,
             ClientRequest::Peek(_) => false,
             ClientRequest::Len(_) => false,
 
@@ -151,11 +181,11 @@ where
 
     pub fn is_for_tail(&self) -> bool {
         match self {
-            // dequeue
+            // deque
             ClientRequest::CreateQueue(_) => false,
             ClientRequest::DeleteQueue(_) => false,
             ClientRequest::Enqueue(_) => false,
-            ClientRequest::Dequeue(_) => false,
+            ClientRequest::Deque(_) => false,
             ClientRequest::Peek(_) => true,
             ClientRequest::Len(_) => true,
 
@@ -170,28 +200,44 @@ where
         }
     }
 
-    pub fn nack(self, response_code: u8) -> Packet<S> {
+    pub fn nack(self, response_code: u8, reason: Option<ByteStr<S>>) -> Packet<S> {
         match self {
-            // dequeue
+            // deque
             ClientRequest::CreateQueue(packet) => {
-                Packet::CreateQueueAck(packet.nack(response_code))
+                DequePacket::CreateQueueAck(packet.nack(response_code, reason)).into()
             }
             ClientRequest::DeleteQueue(packet) => {
-                Packet::DeleteQueueAck(packet.nack(response_code))
+                DequePacket::DeleteQueueAck(packet.nack(response_code, reason)).into()
             }
-            ClientRequest::Enqueue(packet) => Packet::EnqueueAck(packet.nack(response_code)),
-            ClientRequest::Dequeue(packet) => Packet::DequeueAck(packet.nack(response_code)),
-            ClientRequest::Peek(packet) => Packet::PeekAck(packet.nack(response_code)),
-            ClientRequest::Len(packet) => Packet::LenAck(packet.nack(response_code)),
+            ClientRequest::Enqueue(packet) => {
+                DequePacket::EnqueueAck(packet.nack(response_code, reason)).into()
+            }
+            ClientRequest::Deque(packet) => {
+                DequePacket::DequeueAck(packet.nack(response_code, reason)).into()
+            }
+            ClientRequest::Peek(packet) => {
+                DequePacket::PeekAck(packet.nack(response_code, reason)).into()
+            }
+            ClientRequest::Len(packet) => {
+                DequePacket::LenAck(packet.nack(response_code, reason)).into()
+            }
 
             // kv store
-            ClientRequest::Put(packet) => Packet::PutAck(packet.nack(response_code)),
-            ClientRequest::Get(packet) => Packet::GetAck(packet.nack(response_code)),
-            ClientRequest::Delete(packet) => Packet::DeleteAck(packet.nack(response_code)),
+            ClientRequest::Put(packet) => {
+                StorePacket::PutAck(packet.nack(response_code, reason)).into()
+            }
+            ClientRequest::Get(packet) => {
+                StorePacket::GetAck(packet.nack(response_code, reason)).into()
+            }
+            ClientRequest::Delete(packet) => {
+                StorePacket::DeleteAck(packet.nack(response_code, reason)).into()
+            }
 
             // transfer
             #[cfg(feature = "backend")]
-            ClientRequest::Transfer(packet) => Packet::TransferAck(packet.nack(response_code)),
+            ClientRequest::Transfer(packet) => {
+                SystemPacket::TransferAck(packet.nack(response_code, reason)).into()
+            }
         }
     }
 }
@@ -203,11 +249,11 @@ where
 {
     fn encode(&self, writer: &mut W) -> Result<(), necronomicon::Error> {
         match self {
-            // dequeue
+            // deque
             ClientRequest::CreateQueue(packet) => packet.encode(writer),
             ClientRequest::DeleteQueue(packet) => packet.encode(writer),
             ClientRequest::Enqueue(packet) => packet.encode(writer),
-            ClientRequest::Dequeue(packet) => packet.encode(writer),
+            ClientRequest::Deque(packet) => packet.encode(writer),
             ClientRequest::Peek(packet) => packet.encode(writer),
             ClientRequest::Len(packet) => packet.encode(writer),
 
@@ -283,31 +329,31 @@ pub enum ClientResponse<S>
 where
     S: Shared,
 {
-    // dequeue
-    CreateQueue(CreateAck),
-    DeleteQueue(dequeue_codec::DeleteAck),
-    Enqueue(EnqueueAck),
+    // deque
+    CreateQueue(CreateAck<S>),
+    DeleteQueue(deque_codec::DeleteAck<S>),
+    Enqueue(EnqueueAck<S>),
     Dequeue(DequeueAck<S>),
     Peek(PeekAck<S>),
-    Len(LenAck),
+    Len(LenAck<S>),
 
     // kv store
-    Put(PutAck),
+    Put(PutAck<S>),
     Get(GetAck<S>),
-    Delete(kv_store_codec::DeleteAck),
+    Delete(kv_store_codec::DeleteAck<S>),
 
     // transfer
     #[cfg(feature = "backend")]
-    Transfer(TransferAck),
+    Transfer(TransferAck<S>),
 }
 
-impl<S> Ack for ClientResponse<S>
+impl<S> Ack<S> for ClientResponse<S>
 where
     S: Shared,
 {
     fn header(&self) -> &Header {
         match self {
-            // dequeue
+            // deque
             ClientResponse::CreateQueue(ack) => ack.header(),
             ClientResponse::DeleteQueue(ack) => ack.header(),
             ClientResponse::Enqueue(ack) => ack.header(),
@@ -326,24 +372,24 @@ where
         }
     }
 
-    fn response_code(&self) -> u8 {
+    fn response(&self) -> Response<S> {
         match self {
-            // dequeue
-            ClientResponse::CreateQueue(ack) => ack.response_code(),
-            ClientResponse::DeleteQueue(ack) => ack.response_code(),
-            ClientResponse::Enqueue(ack) => ack.response_code(),
-            ClientResponse::Dequeue(ack) => ack.response_code(),
-            ClientResponse::Peek(ack) => ack.response_code(),
-            ClientResponse::Len(ack) => ack.response_code(),
+            // deque
+            ClientResponse::CreateQueue(ack) => ack.response(),
+            ClientResponse::DeleteQueue(ack) => ack.response(),
+            ClientResponse::Enqueue(ack) => ack.response(),
+            ClientResponse::Dequeue(ack) => ack.response(),
+            ClientResponse::Peek(ack) => ack.response(),
+            ClientResponse::Len(ack) => ack.response(),
 
             // kv store
-            ClientResponse::Put(ack) => ack.response_code(),
-            ClientResponse::Get(ack) => ack.response_code(),
-            ClientResponse::Delete(ack) => ack.response_code(),
+            ClientResponse::Put(ack) => ack.response(),
+            ClientResponse::Get(ack) => ack.response(),
+            ClientResponse::Delete(ack) => ack.response(),
 
             // system
             #[cfg(feature = "backend")]
-            ClientResponse::Transfer(ack) => ack.response_code(),
+            ClientResponse::Transfer(ack) => ack.response(),
         }
     }
 }
@@ -355,7 +401,7 @@ where
 {
     fn encode(&self, writer: &mut W) -> Result<(), necronomicon::Error> {
         match self {
-            // dequeue
+            // deque
             ClientResponse::CreateQueue(ack) => ack.encode(writer),
             ClientResponse::DeleteQueue(ack) => ack.encode(writer),
             ClientResponse::Enqueue(ack) => ack.encode(writer),
@@ -430,19 +476,22 @@ where
 {
     fn from(value: Packet<S>) -> Self {
         match value {
-            // dequeue
-            Packet::Enqueue(enqueue) => ClientRequest::Enqueue(enqueue),
-            Packet::Dequeue(dequeue) => ClientRequest::Dequeue(dequeue),
-            Packet::Peek(peek) => ClientRequest::Peek(peek),
-            Packet::Len(len) => ClientRequest::Len(len),
-            Packet::CreateQueue(create) => ClientRequest::CreateQueue(create),
-            Packet::DeleteQueue(delete) => ClientRequest::DeleteQueue(delete),
+            Packet::Deque(deque) => match deque {
+                DequePacket::Enqueue(enqueue) => ClientRequest::Enqueue(enqueue),
+                DequePacket::Dequeue(deque) => ClientRequest::Deque(deque),
+                DequePacket::Peek(peek) => ClientRequest::Peek(peek),
+                DequePacket::Len(len) => ClientRequest::Len(len),
+                DequePacket::CreateQueue(create) => ClientRequest::CreateQueue(create),
+                DequePacket::DeleteQueue(delete) => ClientRequest::DeleteQueue(delete),
+                _ => panic!("invalid packet type {deque:?}"),
+            },
 
-            // kv store
-            Packet::Put(put) => ClientRequest::Put(put),
-            Packet::Get(get) => ClientRequest::Get(get),
-            Packet::Delete(delete) => ClientRequest::Delete(delete),
-
+            Packet::Store(store) => match store {
+                StorePacket::Put(put) => ClientRequest::Put(put),
+                StorePacket::Get(get) => ClientRequest::Get(get),
+                StorePacket::Delete(delete) => ClientRequest::Delete(delete),
+                _ => panic!("invalid packet type {store:?}"),
+            },
             _ => panic!("invalid packet type {value:?}"),
         }
     }
@@ -454,18 +503,21 @@ where
 {
     fn from(value: Packet<S>) -> Self {
         match value {
-            // dequeue
-            Packet::EnqueueAck(ack) => ClientResponse::Enqueue(ack),
-            Packet::DequeueAck(ack) => ClientResponse::Dequeue(ack),
-            Packet::PeekAck(ack) => ClientResponse::Peek(ack),
-            Packet::LenAck(ack) => ClientResponse::Len(ack),
-            Packet::CreateQueueAck(ack) => ClientResponse::CreateQueue(ack),
-            Packet::DeleteQueueAck(ack) => ClientResponse::DeleteQueue(ack),
-
-            // kv store
-            Packet::PutAck(ack) => ClientResponse::Put(ack),
-            Packet::GetAck(ack) => ClientResponse::Get(ack),
-            Packet::DeleteAck(ack) => ClientResponse::Delete(ack),
+            Packet::Deque(deque) => match deque {
+                DequePacket::EnqueueAck(ack) => ClientResponse::Enqueue(ack),
+                DequePacket::DequeueAck(ack) => ClientResponse::Dequeue(ack),
+                DequePacket::PeekAck(ack) => ClientResponse::Peek(ack),
+                DequePacket::LenAck(ack) => ClientResponse::Len(ack),
+                DequePacket::CreateQueueAck(ack) => ClientResponse::CreateQueue(ack),
+                DequePacket::DeleteQueueAck(ack) => ClientResponse::DeleteQueue(ack),
+                _ => panic!("invalid packet type {deque:?}"),
+            },
+            Packet::Store(store) => match store {
+                StorePacket::PutAck(ack) => ClientResponse::Put(ack),
+                StorePacket::GetAck(ack) => ClientResponse::Get(ack),
+                StorePacket::DeleteAck(ack) => ClientResponse::Delete(ack),
+                _ => panic!("invalid packet type {store:?}"),
+            },
 
             _ => panic!("invalid packet type {value:?}"),
         }

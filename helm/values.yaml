@@ -1,36 +1,60 @@
 backend:
   image: backend
   imagePullPolicy: IfNotPresent
-  replicas: 3
+  replicas: 2
   logLevel: info
   config: |
     [endpoints]
     port=666
     operator_addr='operator-0.operator.default.svc.cluster.local:666'
 
-    [store]
-    path = '/opt/lich/store'
-    version = 'V1'
+    [[stores]]
+    dir = '/opt/lich/store1'
+    shards = 100
+    data_len = 4096
+    meta_len = 1024
+    max_disk_usage = 268435456
+    block_size = 4096
+    capacity = 4096
 
-    [store.meta]
-    max_disk_usage = 8192
-    max_key_size = 128
+    [[stores]]
+    dir = '/opt/lich/store2'
+    shards = 100
+    data_len = 4096
+    meta_len = 1024
+    max_disk_usage = 268435456
+    block_size = 4096
+    capacity = 4096
 
-    [store.data]
-    max_disk_usage = 1073741824
-    node_size = 4096
+    [[stores]]
+    dir = '/opt/lich/store3'
+    shards = 100
+    data_len = 4096
+    meta_len = 1024
+    max_disk_usage = 268435456
+    block_size = 4096
+    capacity = 4096
+
+    [[stores]]
+    dir = '/opt/lich/store4'
+    shards = 100
+    data_len = 4096
+    meta_len = 1024
+    max_disk_usage = 268435456
+    block_size = 4096
+    capacity = 4096
 
     [incoming_pool]
     block_size = 4096
-    capacity = 1024
+    capacity = 4096
 
     [outgoing_pool]
     block_size = 4096
-    capacity = 1024
+    capacity = 4096
 frontend:
   image: frontend
   imagePullPolicy: IfNotPresent
-  replicas: 3
+  replicas: 1
   logLevel: info
   config: |
     [endpoints]
@@ -39,14 +63,14 @@ frontend:
 
     [incoming_pool]
     block_size = 4096
-    capacity = 1024
+    capacity = 4096
 
     [outgoing_pool]
     block_size = 4096
-    capacity = 1024
+    capacity = 4096
 operator:
   image: operator
   imagePullPolicy: IfNotPresent
-  logLevel: debug
+  logLevel: info
   config: |
     port=666

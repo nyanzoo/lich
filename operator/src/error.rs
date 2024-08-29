@@ -5,7 +5,4 @@ pub enum Error {
 
     #[error("necronomicon error {0}")]
     Necronomicon(#[from] necronomicon::Error),
-
-    #[error("phylactery error {0}")]
-    Phylactery(#[from] phylactery::Error),
 }

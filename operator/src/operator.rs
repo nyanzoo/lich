@@ -21,7 +21,7 @@ use crate::{
 #[derive(Clone, Default)]
 pub(crate) struct Cluster(Arc<Mutex<ClusterInner>>);
 
-#[derive(Clone, Default)]
+#[derive(Default)]
 struct ClusterInner {
     backends: Vec<Backend>,
     frontend: Option<Frontend>,
@@ -47,14 +47,14 @@ impl ClusterInner {
         })
     }
 
-    fn existing_backend(&mut self, addr: &ByteStr<SharedImpl>) -> Option<(usize, Backend)> {
+    fn existing_backend(&mut self, addr: &ByteStr<SharedImpl>) -> Option<(usize, &Backend)> {
         if let Some((pos, backend)) = self
             .backends
             .iter_mut()
             .enumerate()
             .find(|(_, backend)| backend.addr == *addr)
         {
-            Some((pos, backend.clone()))
+            Some((pos, backend))
         } else {
             None
         }
@@ -77,23 +77,33 @@ impl ClusterInner {
         // - if we have the backend, have it in chain and the successor is lost, then promote it to tail.
         //
         // Other cases should not happen.
-
-        // Update chain
+        //
+        //   // Update chain
         // TODO:
         // - need to determine if there is a candidate or more.
         // - if there is a candidate then we need to send the candidate the transaction log.
-        if let Some((pos, mut backend)) = self.existing_backend(&addr) {
-            let successor = self.backends.get(pos + 1).cloned();
-            if backend.role == ChainRole::Resigner {
+
+        if let Some(pos) = self
+            .backends
+            .iter()
+            .position(|backend| backend.addr == addr)
+        {
+            let successor_role = self.backends.get(pos + 1).map(|backend| backend.role);
+            let backend_role = self
+                .backends
+                .get(pos)
+                .map(|backend| backend.role)
+                .expect("backend role");
+            if backend_role == ChainRole::Resigner {
+                // put backend at end of chain!
+                let mut backend = self.backends.remove(pos);
                 info!("backend {backend:?} rejoining as candidate");
                 backend.role = ChainRole::Candidate;
-
-                // put backend at end of chain!
-                self.backends.remove(pos);
-                self.backends.push(backend.clone());
-            } else if backend.role == ChainRole::Candidate {
+                self.backends.push(backend);
+            } else if backend_role == ChainRole::Candidate {
                 // Need to promote to tail and set tail to replica.
                 // Current tail is now head or replica.
+                let mut backend = self.backends.remove(pos);
                 if let Some(tail) = self.tail_mut() {
                     if tail.role == ChainRole::HeadAndTail {
                         info!("setting current tail {tail:?} to head");
@@ -110,26 +120,25 @@ impl ClusterInner {
                 }
 
                 // put backend at end of chain!
-                self.backends.remove(pos);
-                self.backends.push(backend.clone());
-            } else if let Some(existing_backend) = self.backends.iter_mut().find(|b| b.addr == addr)
-            {
+                self.backends.push(backend);
+            } else if let Some(backend) = self.backends.get_mut(pos) {
                 let new_connection_state = join.successor_lost().into();
-                if existing_backend.successor_connection == new_connection_state {
+                if backend.successor_connection == new_connection_state {
                     error!("backend {backend:?} rejoining with same successor connection state, this is probably a bug");
                 } else {
                     assert_eq!(new_connection_state, ConnectionState::Disconnected);
-                    let successor = successor.expect("successor");
-                    let role = successor.role;
-                    info!("backend {backend:?} rejoining as {role:?} and setting {successor:?} connection state to disconnected");
 
-                    // Make sure we set head and tail correctly.
-                    if (existing_backend.role == ChainRole::Head && role == ChainRole::Tail)
-                        || (existing_backend.role == ChainRole::Tail && role == ChainRole::Head)
-                    {
-                        existing_backend.role = ChainRole::HeadAndTail;
-                    } else {
-                        existing_backend.role = role;
+                    if let Some(role) = successor_role {
+                        info!("backend {backend:?} rejoining as {role:?} and setting successor connection state to disconnected");
+
+                        // Make sure we set head and tail correctly.
+                        if (backend.role == ChainRole::Head && role == ChainRole::Tail)
+                            || (backend.role == ChainRole::Tail && role == ChainRole::Head)
+                        {
+                            backend.role = ChainRole::HeadAndTail;
+                        } else {
+                            backend.role = role;
+                        }
                     }
 
                     if let Some(b) = self.backends.get_mut(pos + 1) {
@@ -187,7 +196,9 @@ impl ClusterInner {
                 },
             );
 
+            debug!("sending report to {:?}: {:?}", frontend.addr, report);
             report.encode(&mut frontend.session)?;
+            frontend.session.flush()?;
         }
 
         self.send_backend_reports(id)?;
@@ -232,7 +243,7 @@ impl ClusterInner {
                 report.encode(&mut session)?;
             }
         } else {
-            join.nack(CHAIN_NOT_READY).encode(&mut session)?;
+            join.nack(CHAIN_NOT_READY, None).encode(&mut session)?;
         }
         session.flush()?;
         self.frontend = Some(Frontend { addr, session });
@@ -354,7 +365,7 @@ mod tests {
     use necronomicon::{
         byte_str,
         system_codec::{Join, JoinAck, Position, Report, Role},
-        Packet, CHAIN_NOT_READY, SUCCESS,
+        Packet, Response, SystemPacket, CHAIN_NOT_READY,
     };
     use net::{session::Session, stream::TcpStream};
 
@@ -369,11 +380,15 @@ mod tests {
 
         let join = Join::new(1, 1, Role::Backend(byte_str(b"head")), 1, false);
 
-        cluster.add(head.clone(), join).expect("add head");
+        cluster.add(head, join).expect("add head");
 
         head_stream.verify_writes(&[
-            Packet::JoinAck(JoinAck::new(SUCCESS, 1)),
-            Packet::Report(Report::new(1, 1, Position::Tail { candidate: None })),
+            Packet::System(SystemPacket::JoinAck(JoinAck::new(Response::success(), 1))),
+            Packet::System(SystemPacket::Report(Report::new(
+                1,
+                1,
+                Position::Tail { candidate: None },
+            ))),
         ]);
 
         let middle_stream = TcpStream::connect("middle:666".to_owned()).unwrap();
@@ -381,48 +396,56 @@ mod tests {
 
         let join = Join::new(1, 2, Role::Backend(byte_str(b"middle")), 1, false);
 
-        cluster.add(middle.clone(), join).expect("add middle");
+        cluster.add(middle, join).expect("add middle");
 
         middle_stream.verify_writes(&[
-            Packet::JoinAck(JoinAck::new(SUCCESS, 2)),
-            Packet::Report(Report::new(1, 2, Position::Tail { candidate: None })),
+            Packet::System(SystemPacket::JoinAck(JoinAck::new(Response::success(), 2))),
+            Packet::System(SystemPacket::Report(Report::new(
+                1,
+                2,
+                Position::Tail { candidate: None },
+            ))),
         ]);
 
-        head_stream.verify_writes(&[Packet::Report(Report::new(
+        head_stream.verify_writes(&[Packet::System(SystemPacket::Report(Report::new(
             1,
             2,
             Position::Head {
                 next: byte_str(b"middle"),
             },
-        ))]);
+        )))]);
 
         let tail_stream = TcpStream::connect("tail:666".to_owned()).unwrap();
         let (_, tail) = Session::new(tail_stream.clone(), 100).split();
 
         let join = Join::new(1, 3, Role::Backend(byte_str(b"tail")), 1, false);
 
-        cluster.add(tail.clone(), join).expect("add tail");
+        cluster.add(tail, join).expect("add tail");
 
         tail_stream.verify_writes(&[
-            Packet::JoinAck(JoinAck::new(SUCCESS, 3)),
-            Packet::Report(Report::new(1, 3, Position::Tail { candidate: None })),
+            Packet::System(SystemPacket::JoinAck(JoinAck::new(Response::success(), 3))),
+            Packet::System(SystemPacket::Report(Report::new(
+                1,
+                3,
+                Position::Tail { candidate: None },
+            ))),
         ]);
 
-        middle_stream.verify_writes(&[Packet::Report(Report::new(
+        middle_stream.verify_writes(&[Packet::System(SystemPacket::Report(Report::new(
             1,
             3,
             Position::Middle {
                 next: byte_str(b"tail"),
             },
-        ))]);
+        )))]);
 
-        head_stream.verify_writes(&[Packet::Report(Report::new(
+        head_stream.verify_writes(&[Packet::System(SystemPacket::Report(Report::new(
             1,
             3,
             Position::Head {
                 next: byte_str(b"middle"),
             },
-        ))]);
+        )))]);
 
         assert_eq!(cluster.0.lock().head().unwrap().addr, byte_str(b"head"));
         assert_eq!(cluster.0.lock().tail().unwrap().addr, byte_str(b"tail"));
@@ -437,48 +460,54 @@ mod tests {
 
         let join = Join::new(1, 1, Role::Frontend(byte_str(b"frontend")), 1, false);
 
-        cluster.add(frontend.clone(), join).expect("add frontend");
+        cluster.add(frontend, join).expect("add frontend");
 
-        frontend_stream.verify_writes(&[Packet::JoinAck(JoinAck::new(CHAIN_NOT_READY, 1))]);
+        frontend_stream.verify_writes(&[Packet::System(SystemPacket::JoinAck(JoinAck::new(
+            Response::fail(CHAIN_NOT_READY, None),
+            1,
+        )))]);
 
         let head_tail_stream = TcpStream::connect("head_tail".to_owned()).unwrap();
         let (_, head_tail) = Session::new(head_tail_stream.clone(), 100).split();
 
         let join = Join::new(1, 2, Role::Backend(byte_str(b"head_tail")), 1, false);
 
-        cluster.add(head_tail.clone(), join).expect("add head_tail");
+        cluster.add(head_tail, join).expect("add head_tail");
 
         head_tail_stream.verify_writes(&[
-            Packet::JoinAck(JoinAck::new(SUCCESS, 2)),
-            Packet::Report(Report::new(1, 2, Position::Tail { candidate: None })),
+            Packet::System(SystemPacket::JoinAck(JoinAck::new(Response::success(), 2))),
+            Packet::System(SystemPacket::Report(Report::new(
+                1,
+                2,
+                Position::Tail { candidate: None },
+            ))),
         ]);
 
         // Frontend gets report when BE joins.
-        frontend_stream.verify_writes(&[Packet::Report(Report::new(
+        frontend_stream.verify_writes(&[Packet::System(SystemPacket::Report(Report::new(
             1,
             2,
             Position::Frontend {
                 head: Some(byte_str(b"head_tail")),
                 tail: Some(byte_str(b"head_tail")),
             },
-        ))]);
+        )))]);
 
         // New frontend gets report when it joins.
         let frontend_stream = TcpStream::connect("new_frontend".to_owned()).unwrap();
         let (_, frontend) = Session::new(frontend_stream.clone(), 100).split();
         let join = Join::new(1, 3, Role::Frontend(byte_str(b"new_frontend")), 1, false);
-
-        cluster.add(frontend.clone(), join).expect("add frontend");
+        cluster.add(frontend, join).expect("add frontend");
         frontend_stream.verify_writes(&[
-            Packet::JoinAck(JoinAck::new(SUCCESS, 3)),
-            Packet::Report(Report::new(
+            Packet::System(SystemPacket::JoinAck(JoinAck::new(Response::success(), 3))),
+            Packet::System(SystemPacket::Report(Report::new(
                 1,
                 3,
                 Position::Frontend {
                     head: Some(byte_str(b"head_tail")),
                     tail: Some(byte_str(b"head_tail")),
                 },
-            )),
+            ))),
         ]);
     }
 
@@ -491,11 +520,15 @@ mod tests {
 
         let join = Join::new(1, 1, Role::Backend(byte_str(b"head")), 1, false);
 
-        cluster.add(head.clone(), join).expect("add head");
+        cluster.add(head, join).expect("add head");
 
         head_stream.verify_writes(&[
-            Packet::JoinAck(JoinAck::new(SUCCESS, 1)),
-            Packet::Report(Report::new(1, 1, Position::Tail { candidate: None })),
+            Packet::System(SystemPacket::JoinAck(JoinAck::new(Response::success(), 1))),
+            Packet::System(SystemPacket::Report(Report::new(
+                1,
+                1,
+                Position::Tail { candidate: None },
+            ))),
         ]);
 
         // Create a tail stream and drop it.
@@ -505,33 +538,42 @@ mod tests {
 
             let join = Join::new(1, 2, Role::Backend(byte_str(b"tail")), 1, false);
 
-            cluster.add(tail.clone(), join).expect("add tail");
+            cluster.add(tail, join).expect("add tail");
 
             tail_stream.verify_writes(&[
-                Packet::JoinAck(JoinAck::new(SUCCESS, 2)),
-                Packet::Report(Report::new(1, 2, Position::Tail { candidate: None })),
+                Packet::System(SystemPacket::JoinAck(JoinAck::new(Response::success(), 2))),
+                Packet::System(SystemPacket::Report(Report::new(
+                    1,
+                    2,
+                    Position::Tail { candidate: None },
+                ))),
             ]);
 
-            head_stream.verify_writes(&[Packet::Report(Report::new(
+            head_stream.verify_writes(&[Packet::System(SystemPacket::Report(Report::new(
                 1,
                 2,
                 Position::Head {
                     next: byte_str(b"tail"),
                 },
-            ))]);
+            )))]);
 
             assert_eq!(cluster.0.lock().head().unwrap().addr, byte_str(b"head"));
             assert_eq!(cluster.0.lock().tail().unwrap().addr, byte_str(b"tail"));
         }
 
+        let (_, head) = Session::new(head_stream.clone(), 100).split();
         // Head should notice that tail is gone and re-join as candidate to become tail.
         let join = Join::new(1, 3, Role::Backend(byte_str(b"head")), 1, true);
 
-        cluster.add(head.clone(), join).expect("add head again");
+        cluster.add(head, join).expect("add head again");
 
         head_stream.verify_writes(&[
-            Packet::JoinAck(JoinAck::new(SUCCESS, 3)),
-            Packet::Report(Report::new(1, 3, Position::Tail { candidate: None })),
+            Packet::System(SystemPacket::JoinAck(JoinAck::new(Response::success(), 3))),
+            Packet::System(SystemPacket::Report(Report::new(
+                1,
+                3,
+                Position::Tail { candidate: None },
+            ))),
         ]);
 
         // Rejoin the tail and check that it is now a candidate. Head should become Tail.
@@ -541,40 +583,45 @@ mod tests {
 
         let join = Join::new(1, 4, Role::Backend(byte_str(b"tail")), 1, false);
 
-        cluster.add(tail.clone(), join).expect("add tail");
+        cluster.add(tail, join).expect("add tail");
 
         tail_stream.verify_writes(&[
-            Packet::JoinAck(JoinAck::new(SUCCESS, 4)),
-            Packet::Report(Report::new(1, 4, Position::Candidate)),
+            Packet::System(SystemPacket::JoinAck(JoinAck::new(Response::success(), 4))),
+            Packet::System(SystemPacket::Report(Report::new(1, 4, Position::Candidate))),
         ]);
 
-        head_stream.verify_writes(&[Packet::Report(Report::new(
+        head_stream.verify_writes(&[Packet::System(SystemPacket::Report(Report::new(
             1,
             4,
             Position::Tail {
                 candidate: Some(byte_str(b"tail")),
             },
-        ))]);
+        )))]);
 
         assert_eq!(cluster.0.lock().head().unwrap().addr, byte_str(b"head"));
         assert_eq!(cluster.0.lock().tail().unwrap().addr, byte_str(b"head"));
 
         let join = Join::new(1, 5, Role::Backend(byte_str(b"tail")), 1, false);
 
-        cluster.add(tail.clone(), join).expect("add tail");
+        let (_, tail) = Session::new(tail_stream.clone(), 100).split();
+        cluster.add(tail, join).expect("add tail");
 
         tail_stream.verify_writes(&[
-            Packet::JoinAck(JoinAck::new(SUCCESS, 5)),
-            Packet::Report(Report::new(1, 5, Position::Tail { candidate: None })),
+            Packet::System(SystemPacket::JoinAck(JoinAck::new(Response::success(), 5))),
+            Packet::System(SystemPacket::Report(Report::new(
+                1,
+                5,
+                Position::Tail { candidate: None },
+            ))),
         ]);
 
-        head_stream.verify_writes(&[Packet::Report(Report::new(
+        head_stream.verify_writes(&[Packet::System(SystemPacket::Report(Report::new(
             1,
             5,
             Position::Head {
                 next: byte_str(b"tail"),
             },
-        ))]);
+        )))]);
     }
 
     // #[test]

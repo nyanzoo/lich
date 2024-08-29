@@ -14,7 +14,7 @@ thiserror = { workspace = true }
 net = { path = "../net" }
 requests = { path = "../requests", features = ["backend"] }
 
-necronomicon = { workspace = true }
+necronomicon = { workspace = true, features = ["timeout"] }
 phylactery = { workspace = true }
 
 [dev-dependencies]

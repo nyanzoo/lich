@@ -3,7 +3,7 @@ use std::{io::Write, println};
 use clap::Parser;
 use necronomicon::{
     full_decode, kv_store_codec, BinaryData, ByteStr, Encode, Packet, Pool as _, PoolImpl,
-    SharedImpl,
+    SharedImpl, StorePacket,
 };
 
 #[derive(Parser, Debug)]
@@ -65,24 +65,32 @@ impl Command {
                 let mut owned = pool.acquire("test");
                 let value = BinaryData::from_owned(value, &mut owned).expect("value");
 
-                Packet::Put(kv_store_codec::Put::new(
+                Packet::Store(StorePacket::Put(kv_store_codec::Put::new(
                     1,
                     uuid,
                     key.inner().clone(),
                     value,
-                ))
+                )))
             }
             Command::Get { key } => {
                 let mut owned = pool.acquire("test");
                 let key = ByteStr::from_owned(key, &mut owned).expect("key");
 
-                Packet::Get(kv_store_codec::Get::new(1, uuid, key.inner().clone()))
+                Packet::Store(StorePacket::Get(kv_store_codec::Get::new(
+                    1,
+                    uuid,
+                    key.inner().clone(),
+                )))
             }
             Command::Delete { key } => {
                 let mut owned = pool.acquire("test");
                 let key = ByteStr::from_owned(key, &mut owned).expect("key");
 
-                Packet::Delete(kv_store_codec::Delete::new(1, uuid, key.inner().clone()))
+                Packet::Store(StorePacket::Delete(kv_store_codec::Delete::new(
+                    1,
+                    uuid,
+                    key.inner().clone(),
+                )))
             }
         }
     }

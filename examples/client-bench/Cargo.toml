@@ -7,10 +7,9 @@ version = "0.1.0"
 
 [dependencies]
 clap = { workspace = true, features = ["derive"] }
-log = { workspace = true }
 rand = { workspace = true }
-serde = { workspace = true, features = ["derive"] }
-thiserror = { workspace = true }
 uuid = { workspace = true, features = ["serde", "v4"] }
+
+logger = { path = "../../logger" }
 
 necronomicon = { workspace = true, features = ["test"] }

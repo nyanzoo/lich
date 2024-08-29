@@ -27,7 +27,7 @@ impl From<bool> for ConnectionState {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(crate) struct Backend {
     pub(crate) addr: ByteStr<SharedImpl>,
     pub(crate) role: ChainRole,
@@ -35,7 +35,7 @@ pub(crate) struct Backend {
     pub(crate) successor_connection: ConnectionState,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(crate) struct Frontend {
     pub(crate) addr: ByteStr<SharedImpl>,
     pub(crate) session: SessionWriter,

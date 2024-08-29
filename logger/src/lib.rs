@@ -1,3 +1,33 @@
+#[cfg(feature = "simple")]
+pub mod simple {
+    use crate::log_filter;
+
+    #[macro_export]
+    macro_rules! init_logger {
+        () => {
+            use logger::simple::create_logger;
+
+            create_logger();
+        };
+    }
+
+    pub fn create_logger() {
+        let filter = log_filter();
+
+        simplelog::SimpleLogger::init(
+            filter,
+            simplelog::ConfigBuilder::new()
+                .set_max_level(log::LevelFilter::Error)
+                .set_time_level(log::LevelFilter::Error)
+                .set_thread_mode(simplelog::ThreadLogMode::Both)
+                .set_time_format_rfc3339()
+                .set_thread_level(log::LevelFilter::Error)
+                .build(),
+        )
+        .expect("simple logger init");
+    }
+}
+
 #[cfg(feature = "otel")]
 pub mod otel {
     #[macro_export]
@@ -39,8 +69,8 @@ pub mod otel {
     }
 }
 
-#[cfg(feature = "simple")]
-pub mod simple {
+#[cfg(feature = "env")]
+pub mod env {
 
     #[macro_export]
     macro_rules! init_logger {
@@ -81,3 +111,11 @@ pub use otel::*;
 
 #[cfg(feature = "syslog")]
 pub use syslog::*;
+
+pub(crate) fn log_filter() -> log::LevelFilter {
+    const DEFAULT_FILTER: log::LevelFilter = log::LevelFilter::Info;
+
+    std::env::var("RUST_LOG")
+        .map(|filter| filter.parse().unwrap_or(DEFAULT_FILTER))
+        .unwrap_or(DEFAULT_FILTER)
+}

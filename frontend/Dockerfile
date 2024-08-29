@@ -1,7 +1,7 @@
-FROM rust AS chef 
-# We only pay the installation cost once, 
+FROM rust AS chef
+# We only pay the installation cost once,
 # it will be cached from the second build onwards
-RUN cargo install cargo-chef 
+RUN cargo install cargo-chef
 WORKDIR /app
 
 FROM chef AS planner
@@ -20,6 +20,6 @@ RUN cargo build --release
 FROM debian:stable-slim AS runtime
 RUN apt-get update && apt-get install -y net-tools dnsutils netcat-openbsd
 COPY --from=builder /app/target/release/frontend /usr/local/bin
-ENV RUST_BACKTRACE=1
+ENV RUST_BACKTRACE=full
 ENTRYPOINT ["/usr/local/bin/frontend"]
 # ENTRYPOINT [ "sleep", "infinity" ]

@@ -11,7 +11,7 @@ use clap::Parser;
 use necronomicon::{
     full_decode,
     kv_store_codec::{Get, Put},
-    Ack, BinaryData, ByteStr, Encode, Packet, Pool, PoolImpl,
+    Ack, BinaryData, ByteStr, Encode, Packet, Pool, PoolImpl, StorePacket,
 };
 use rand::Rng;
 use uuid::Uuid;
@@ -88,12 +88,16 @@ fn run(host: String, port: u16, scenario: Scenario) {
             let time_to_receive = Instant::now();
             for _ in 0..count {
                 let mut buffer = pool.acquire("bench");
-                let response = full_decode(&mut stream, &mut buffer, None).unwrap();
-                let Packet::PutAck(response) = response else {
-                    panic!("received unexpected response: {:?}", response);
-                };
-                if !packet_tracker.remove(&response.header().uuid) {
-                    panic!("received unexpected response: {:?}", response);
+                let response = full_decode(&mut stream, &mut buffer, None);
+                if let Ok(response) = response {
+                    let Packet::Store(StorePacket::PutAck(response)) = response else {
+                        panic!("received unexpected response: {:?}", response);
+                    };
+                    if !packet_tracker.remove(&response.header().uuid) {
+                        panic!("received unexpected response: {:?}", response);
+                    }
+                } else {
+                    println!("err: {:?}", response);
                 }
             }
             println!("time to receive: {:?}", time_to_receive.elapsed());
@@ -138,22 +142,22 @@ fn run(host: String, port: u16, scenario: Scenario) {
 
                 let response = full_decode(&mut stream, &mut buffer, None).unwrap();
                 match response {
-                    Packet::PutAck(response) => {
+                    Packet::Store(StorePacket::PutAck(response)) => {
                         report
                             .entry("put")
                             .or_default()
-                            .entry(response.response_code())
+                            .entry(response.response().code())
                             .or_default()
                             .add_assign(1);
                         if !packet_tracker.remove(&response.header().uuid) {
                             panic!("received unexpected response: {:?}", response);
                         }
                     }
-                    Packet::GetAck(response) => {
+                    Packet::Store(StorePacket::GetAck(response)) => {
                         report
                             .entry("get")
                             .or_default()
-                            .entry(response.response_code())
+                            .entry(response.response().code())
                             .or_default()
                             .add_assign(1);
                         if !packet_tracker.remove(&response.header().uuid) {
@@ -182,9 +186,12 @@ fn run(host: String, port: u16, scenario: Scenario) {
 fn generate_random_bytes(size: usize) -> Vec<u8> {
     let mut rng = rand::thread_rng();
     (0..size).map(|_| rng.gen::<u8>()).collect()
+    // "kittens".as_bytes().to_vec()
 }
 
 fn main() {
+    logger::init_logger!();
+
     let cli = Cli::parse();
 
     run(cli.host, cli.port, cli.scenario);

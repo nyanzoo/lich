@@ -5,7 +5,7 @@ use std::{
     net::ToSocketAddrs,
 };
 
-use crossbeam::channel::{Receiver, Sender};
+use crossbeam::channel::{Receiver, Sender, TryRecvError};
 use log::{debug, error, info, trace};
 use requests::ClientResponse;
 
@@ -48,18 +48,26 @@ impl Outgoing {
         ack_tx: Sender<ClientResponse<SharedImpl>>,
         pool: PoolImpl,
     ) -> Result<Self, Error> {
-        let mut retry = 50;
+        const MAX_RETRY: usize = 5;
+        const MIN_SLEEP_MS: u64 = 100;
+        const MAX_SLEEP_MS: u64 = 2000;
+
+        let mut sleep = MIN_SLEEP_MS;
+        let mut retry = 0;
 
         let addr = loop {
             match addr.to_socket_addrs() {
                 Ok(mut addr) => break addr.next().expect("no addr found").to_string(),
                 Err(err) => {
-                    retry -= 1;
-                    if retry == 0 {
+                    sleep = std::cmp::min(sleep * 2, MAX_SLEEP_MS);
+                    if sleep == MAX_SLEEP_MS {
+                        retry += 1;
+                    }
+                    if retry == MAX_RETRY {
                         return Err(Error::Connection);
                     }
                     debug!("failed to connect to outgoing: {err}, retries left {retry}");
-                    std::thread::sleep(std::time::Duration::from_secs(1));
+                    std::thread::sleep(std::time::Duration::from_millis(sleep));
                 }
             }
         };
@@ -70,12 +78,15 @@ impl Outgoing {
                     break stream;
                 }
                 Err(err) => {
-                    retry -= 1;
-                    if retry == 0 {
+                    sleep = std::cmp::min(sleep * 2, MAX_SLEEP_MS);
+                    if sleep == MAX_SLEEP_MS {
+                        retry += 1;
+                    }
+                    if retry == MAX_RETRY {
                         return Err(Error::Connection);
                     }
                     debug!("failed to connect to outgoing: {err}, retries left {retry}");
-                    std::thread::sleep(std::time::Duration::from_secs(1));
+                    std::thread::sleep(std::time::Duration::from_millis(sleep));
                 }
             }
         };
@@ -83,81 +94,101 @@ impl Outgoing {
         let (mut read, mut write) = (BufReader::new(stream.clone()), stream.clone());
 
         let (kill_tx, kill_rx) = crossbeam::channel::unbounded();
-        let read_handle = std::thread::spawn({
-            let addr = addr.clone();
-            move || {
-                loop {
-                    match requests_rx.recv() {
-                        Ok(packet) => {
-                            trace!("sending packet {:?} to {addr}", packet);
+        let write_handle = std::thread::Builder::new()
+            .name(format!("outgoing-write {addr}"))
+            .spawn({
+                let addr = addr.clone();
+                move || {
+                    let mut has_written = false;
+                    loop {
+                        match requests_rx.try_recv() {
+                            Ok(packet) => {
+                                trace!("sending packet {:?} to {addr}", packet);
 
-                            if let Err(err) = packet.encode(&mut write) {
-                                trace!(
-                                "failed to encode packet {packet:?} due to {err}, flushing write"
-                            );
-                                break;
+                                if let Err(err) = packet.encode(&mut write) {
+                                    trace!("failed to encode packet {packet:?} due to {err}, flushing write");
+                                    break;
+                                }
+                                has_written = true;
                             }
-
-                            trace!("flushing write");
-                            if let Err(err) = write.flush() {
-                                trace!("failed to flush write due to {err}");
+                            Err(TryRecvError::Empty) => {
+                                if has_written {
+                                    has_written = false;
+                                    trace!("flushing write");
+                                    if let Err(err) = write.flush() {
+                                        trace!("failed to flush write due to {err}");
+                                        break;
+                                    }
+                                }
+                                std::thread::sleep(std::time::Duration::from_millis(100));
+                            }
+                            Err(TryRecvError::Disconnected) => {
+                                trace!("requests_rx.recv: disconnected");
                                 break;
                             }
                         }
-                        Err(err) => {
-                            trace!("requests_rx.recv: closed due to {err}");
+                    }
+
+                    trace!("flushing write");
+                    if let Err(err) = write.flush() {
+                        trace!("failed to flush write due to {err}");
+                    }
+                    kill_tx.send(()).expect("kill_tx.send");
+                }
+            })
+            .expect("write thread spawn failed");
+
+        let read_handle = std::thread::Builder::new()
+            .name(format!("outgoing-read {addr}"))
+            .spawn({
+                let addr = addr.clone();
+                move || loop {
+                    match kill_rx.try_recv() {
+                        Ok(_) => {
+                            trace!("kill_rx.try_recv: received kill signal");
+                            break;
+                        }
+                        Err(TryRecvError::Empty) => {}
+                        Err(TryRecvError::Disconnected) => {
+                            trace!("kill_rx.try_recv: closed");
                             break;
                         }
                     }
-                }
-                kill_tx.send(()).expect("kill_tx.send");
-            }
-        });
 
-        let write_handle = std::thread::spawn({
-            let addr = addr.clone();
-            move || loop {
-                match kill_rx.try_recv() {
-                    Ok(_) => {
-                        trace!("kill_rx.try_recv: received kill signal");
-                        break;
-                    }
-                    Err(crossbeam::channel::TryRecvError::Empty) => {}
-                    Err(crossbeam::channel::TryRecvError::Disconnected) => {
-                        trace!("kill_rx.try_recv: closed");
-                        break;
-                    }
-                }
-
-                let mut previous_decoded_header = None;
-                'pool: loop {
-                    let mut buffer = pool.acquire(BufferOwner::FullDecode);
-                    'decode: loop {
-                        match full_decode(&mut read, &mut buffer, previous_decoded_header.take()) {
-                            Ok(packet) => {
-                                trace!("received packet {:?} on {addr}", packet);
-                                let response = ClientResponse::from(packet);
-                                if let Err(err) = ack_tx.send(response) {
-                                    trace!("failed to send ack due to {err}");
+                    let mut previous_decoded_header = None;
+                    'pool: loop {
+                        let mut buffer = pool.acquire(BufferOwner::FullDecode);
+                        'decode: loop {
+                            match full_decode(
+                                &mut read,
+                                &mut buffer,
+                                previous_decoded_header.take(),
+                            ) {
+                                Ok(packet) => {
+                                    trace!("received packet {:?} on {addr}", packet);
+                                    let response = ClientResponse::from(packet);
+                                    if let Err(err) = ack_tx.send(response) {
+                                        trace!("failed to send ack due to {err}");
+                                        break 'pool;
+                                    }
+                                }
+                                Err(necronomicon::Error::BufferTooSmallForPacketDecode {
+                                    header,
+                                    ..
+                                }) => {
+                                    let _ = previous_decoded_header.insert(header);
+                                    break 'decode;
+                                }
+                                Err(err) => {
+                                    trace!("reader err: {err}");
                                     break 'pool;
                                 }
-                            }
-                            Err(necronomicon::Error::BufferTooSmallForPacketDecode {
-                                header,
-                                ..
-                            }) => {
-                                let _ = previous_decoded_header.insert(header);
-                                break 'decode;
-                            }
-                            Err(err) => {
-                                trace!("reader closed due to {err}");
-                                break 'pool;
                             }
                         }
                     }
                 }
-            }
-        });
+            })
+            .expect("read thread spawn failed");
 
         Ok(Self {
             _read: read_handle,
@@ -175,7 +206,7 @@ mod tests {
 
     use matches::assert_matches;
 
-    use necronomicon::{binary_data, kv_store_codec::Put, Packet, PoolImpl};
+    use necronomicon::{binary_data, kv_store_codec::Put, Packet, PoolImpl, StorePacket};
     use net::stream::{gaurantee_address_rejection, get_connection};
     use requests::ClientResponse;
 
@@ -209,15 +240,15 @@ mod tests {
         let put = Put::new(1, 0, binary_data(b"key"), binary_data(b"value"));
 
         requests_tx
-            .send(Packet::Put(put.clone()))
+            .send(Packet::Store(StorePacket::Put(put.clone())))
             .expect("send ping");
 
         // give time for the outgoing to receive the put.
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        std::thread::sleep(std::time::Duration::from_secs(1));
 
         let stream = get_connection(ADDRESS).expect("stream");
 
-        stream.verify_writes(&[Packet::Put(put.clone())]);
+        stream.verify_writes(&[Packet::Store(StorePacket::Put(put.clone()))]);
         let put_ack = put.ack();
         stream.fill_read(put_ack.clone());
 

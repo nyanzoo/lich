@@ -154,7 +154,7 @@ tasks:
 
   cluster-create:
     cmds:
-      - k3d cluster create lich --volume /tmp/lich:/opt/lich -p 666:30666
+      - k3d cluster create lich --volume /Users/robertbaldwin/Documents/GitHub/lichdom/lich/mnt/lich:/opt/lich -p 666:30666
       - kubectl label node k3d-lich-server-0 app=backend
 
   cluster-delete:

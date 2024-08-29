@@ -4,7 +4,7 @@ use log::{debug, error, info, trace};
 use rayon::ThreadPoolBuilder;
 
 use config::OperatorConfig;
-use io::decode_packet_on_reader_and;
+use io::{decode_packet_on_reader_and, wait_for_join};
 use logger::init_logger;
 use necronomicon::{PoolImpl, SharedImpl};
 use net::{session::Session, stream::TcpListener};
@@ -33,8 +33,9 @@ fn main() {
         ][..],
     )
     .expect("listener");
-    let pool = ThreadPoolBuilder::new()
+    let thread_pool = ThreadPoolBuilder::new()
         .num_threads(4)
+        .thread_name(|x| format!("operator-{}", x))
         .build()
         .expect("thread pool");
 
@@ -44,36 +45,42 @@ fn main() {
     for stream in listener.incoming() {
         trace!("incoming");
         let cluster = cluster.clone();
-        pool.spawn(move || match stream {
+        match stream {
             Ok(stream) => {
                 let session = Session::new(stream, 5);
                 info!("new session {:?}", session);
                 let (mut read_session, session_writer) = session.split();
                 let pool = PoolImpl::new(1024, 1024);
-                decode_packet_on_reader_and(&mut read_session, &pool, |packet| {
-                    let request: System<SharedImpl> = packet.into();
 
-                    match request {
-                        System::Join(join) => {
-                            info!("join: {:?}", join);
-                            if let Err(err) = cluster.add(session_writer.clone(), join) {
-                                error!("cluster.add: {}", err);
-                                return false;
-                            }
+                match wait_for_join(&mut read_session, &pool) {
+                    Ok(join) => {
+                        info!("join: {:?}", join);
+                        if let Err(err) = cluster.add(session_writer, join) {
+                            error!("cluster.add: {}", err);
+                            continue;
                         }
-                        System::ReportAck(ack) => {
-                            info!("report ack: {:?}", ack);
-                        }
-                        _ => {
-                            error!("expected join/report_ack request but got {:?}", request);
-                            return false;
-                        }
+                        thread_pool.spawn(move || {
+                            decode_packet_on_reader_and(&mut read_session, &pool, |packet| {
+                                let request: System<SharedImpl> = packet.into();
+
+                                match request {
+                                    System::ReportAck(ack) => {
+                                        info!("report ack: {:?}", ack);
+                                    }
+                                    _ => {
+                                        error!("expected report_ack request but got {:?}", request);
+                                        return false;
+                                    }
+                                }
+
+                                true
+                            });
+                        });
                     }
-
-                    true
-                });
+                    Err(err) => error!("wait_for_join: {}", err),
+                }
             }
             Err(err) => error!("listener.accept: {}", err),
-        });
+        }
     }
 }

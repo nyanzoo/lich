@@ -7,7 +7,7 @@ version = "0.1.0"
 
 [dependencies]
 log = { workspace = true }
-# simple
+# env
 env_logger = { workspace = true, optional = true }
 # otel
 opentelemetry-appender-log = { workspace = true, default-features = false, optional = true }
@@ -15,11 +15,14 @@ opentelemetry = { workspace = true, optional = true }
 opentelemetry_sdk = { workspace = true, optional = true }
 opentelemetry-semantic-conventions = { workspace = true, optional = true }
 opentelemetry-stdout = { workspace = true, optional = true }
+# simple
+simplelog = { workspace = true, optional = true }
 # sys
 syslog = { workspace = true, optional = true }
 
 [features]
 default = ["simple"]
+env = ["env_logger"]
 otel = [
     "opentelemetry/logs",
     "opentelemetry_sdk/logs",
@@ -27,5 +30,5 @@ otel = [
     "opentelemetry-appender-log",
     "opentelemetry-stdout/logs",
 ]
-simple = ["env_logger"]
+simple = ["simplelog"]
 sys = ["syslog"]

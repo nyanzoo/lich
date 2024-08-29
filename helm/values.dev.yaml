@@ -1,33 +1,59 @@
 backend:
   image: backend
-  replicas: 3
+  replicas: 2
+  logLevel: info
   store: |
     [endpoints]
     port=666
 
-    [store]
-    path = '/opt/lich/store'
-    version = 'V1'
+    [[stores]]
+    dir = '/opt/lich/store1'
+    shards = 100
+    data_len = 4096
+    meta_len = 1024
+    max_disk_usage = 268435456
+    block_size = 4096
+    capacity = 4096
 
-    [store.meta]
-    max_disk_usage = 4096
-    max_key_size = 128
+    [[stores]]
+    dir = '/opt/lich/store2'
+    shards = 100
+    data_len = 4096
+    meta_len = 1024
+    max_disk_usage = 268435456
+    block_size = 4096
+    capacity = 4096
 
-    [store.data]
-    node_size = 4096
+    [[stores]]
+    dir = '/opt/lich/store3'
+    shards = 100
+    data_len = 4096
+    meta_len = 1024
+    max_disk_usage = 268435456
+    block_size = 4096
+    capacity = 4096
+
+    [[stores]]
+    dir = '/opt/lich/store4'
+    shards = 100
+    data_len = 4096
+    meta_len = 1024
+    max_disk_usage = 268435456
+    block_size = 4096
+    capacity = 4096
 
     [incoming_pool]
     block_size = 4096
-    capacity = 1024
+    capacity = 4096
 
     [outgoing_pool]
     block_size = 4096
-    capacity = 1024
+    capacity = 4096
 frontend:
   image: frontend
   imagePullPolicy: IfNotPresent
-  replicas: 3
-  logLevel: debug
+  replicas: 1
+  logLevel: info
   config: |
     [endpoints]
     port=666
@@ -35,10 +61,10 @@ frontend:
 
     [incoming_pool]
     block_size = 4096
-    capacity = 1024
+    capacity = 4096
 
     [outgoing_pool]
     block_size = 4096
-    capacity = 1024
+    capacity = 4096
 operator:
   image: operator

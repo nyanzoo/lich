@@ -1,6 +1,6 @@
 use std::{
     fmt::Debug,
-    io::{BufReader, Read, Write},
+    io::{BufReader, BufWriter, Read, Write},
 };
 
 use log::debug;
@@ -48,22 +48,13 @@ impl Debug for SessionReader {
 }
 
 pub struct SessionWriter {
-    stream: TcpStream,
+    stream: BufWriter<TcpStream>,
     id: u64,
 }
 
 impl SessionWriter {
     pub fn id(&self) -> u64 {
         self.id
-    }
-}
-
-impl Clone for SessionWriter {
-    fn clone(&self) -> Self {
-        Self {
-            stream: self.stream.clone(),
-            id: self.id,
-        }
     }
 }
 
@@ -137,6 +128,7 @@ impl Session {
             keep_alive: self.keep_alive,
             id: self.id,
         };
+        let writer = BufWriter::new(writer);
         let writer = SessionWriter {
             stream: writer,
             id: self.id,

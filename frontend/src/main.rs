@@ -1,4 +1,4 @@
-use std::thread;
+use std::{panic, process, thread};
 
 use crossbeam::channel::bounded;
 use log::info;
@@ -8,12 +8,15 @@ use io::incoming::Incoming;
 use logger::init_logger;
 use necronomicon::PoolImpl;
 
-use crate::state::{Init, State};
+use crate::state::{init::Init, State};
 
+mod operator_connection;
+pub(crate) use operator_connection::OperatorConnection;
 mod state;
 
 const CONFIG: &str = "/etc/lich/lich.toml";
 
+#[derive(Clone, Copy, Debug)]
 enum BufferOwner {
     Join,
     OperatorFullDecode,
@@ -29,6 +32,13 @@ impl necronomicon::BufferOwner for BufferOwner {
 }
 
 fn main() {
+    let orig_hook = panic::take_hook();
+    panic::set_hook(Box::new(move |panic_info| {
+        // invoke the default handler and exit the process
+        orig_hook(panic_info);
+        process::exit(1);
+    }));
+
     init_logger!();
 
     info!("starting lich(frontend) version 0.0.1");

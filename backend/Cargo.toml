@@ -10,8 +10,6 @@ crossbeam = { workspace = true }
 dhat = { workspace = true, optional = true }
 hashlink = { workspace = true }
 log = { workspace = true }
-rayon = { workspace = true }
-serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
 toml = { workspace = true }
 uuid = { version = "1.8", features = ["serde", "v4"] }
@@ -21,10 +19,9 @@ io = { path = "../io" }
 logger = { path = "../logger" }
 net = { path = "../net" }
 requests = { path = "../requests", features = ["backend"] }
-util = { path = "../util" }
 
-necronomicon = { workspace = true }
-phylactery = { workspace = true }
+necronomicon = { workspace = true, features = ["timeout"] }
+phylactery = { workspace = true, branch = "develop" }
 
 [dev-dependencies]
 tempfile = { workspace = true }

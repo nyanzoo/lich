@@ -2,9 +2,10 @@ use std::{
     collections::BTreeMap,
     io::Write,
     net::{IpAddr, Ipv4Addr, SocketAddr},
+    time::Duration,
 };
 
-use crossbeam::channel::{bounded, Receiver, Sender};
+use crossbeam::channel::{bounded, Receiver, Sender, TryRecvError};
 use log::{debug, error, info, trace, warn};
 use rayon::{ThreadPool, ThreadPoolBuilder};
 
@@ -21,7 +22,7 @@ use crate::decode_packet_on_reader_and;
 /// This is for accepting incoming requests.
 pub struct Incoming {
     listener: TcpListener,
-    // NOTE: later maybe replace with dequeue? It might be slower but it will allow for recovery of even unprocessed msgs.
+    // NOTE: later maybe replace with deque? It might be slower but it will allow for recovery of even unprocessed msgs.
     requests_tx: Sender<ProcessRequest<SharedImpl>>,
     pool: ThreadPool,
 }
@@ -33,6 +34,7 @@ impl Incoming {
             .expect("listener");
         let pool = ThreadPoolBuilder::new()
             .num_threads(4)
+            .thread_name(|x| format!("incoming-{x}"))
             .build()
             .expect("thread pool");
         Self {
@@ -65,22 +67,22 @@ impl Incoming {
                     }
 
                     let requests_tx = requests_tx.clone();
-                    let (ack_tx, ack_rx) = bounded(1024);
+                    let (ack_tx, ack_rx) = bounded::<ClientResponse<SharedImpl>>(1024);
                     info!("new session {:?}", session);
                     let (read, write) = session.split();
-                    let ack_writer = write.clone();
+                    // let ack_writer = write.clone();
                     let buffer_pool = buffer_pool.clone();
-                    // I think the acks need to be oneshots that are per
+
                     pool.spawn(|| {
                         let id = read.id();
-                        debug!("spawned thrad for requests on session {id}");
-                        handle_requests(read, write, requests_tx, ack_tx, buffer_pool);
+                        debug!("spawned thread for requests on session {id}");
+                        handle_requests(read, requests_tx, ack_tx, buffer_pool);
                         debug!("thread for requests on session {id} exited");
                     });
                     pool.spawn(|| {
-                        let id = ack_writer.id();
+                        let id = write.id();
                         debug!("spawned thread for acks for session {id}");
-                        handle_acks(ack_writer, ack_rx);
+                        handle_acks(write, ack_rx);
                         debug!("thread for acks for session {id} exited");
                     });
                 }
@@ -91,26 +93,31 @@ impl Incoming {
 }
 
 fn handle_acks(mut session: SessionWriter, ack_rx: Receiver<ClientResponse<SharedImpl>>) {
+    let mut wrote = false;
     loop {
-        match ack_rx.recv() {
+        match ack_rx.try_recv() {
             Ok(ack) => {
                 trace!("got ack {:?}", ack);
                 // TODO: need to see if we need to break here on some cases?
                 if let Err(err) = ack.encode(&mut session) {
                     trace!("failed to encode ack {ack:?} due to {err}, flushing session");
+                    break;
+                }
+
+                wrote = true;
+            }
+            Err(TryRecvError::Empty) => {
+                if wrote {
                     if let Err(err) = session.flush() {
                         debug!("session.flush: {err}");
                         break;
                     }
-                    // encode again because first failed.
-                    if let Err(err) = ack.encode(&mut session) {
-                        warn!("failed to encode ack {ack:?} due to {err}, flushing session");
-                        break;
-                    }
+                } else {
+                    std::thread::sleep(Duration::from_millis(100));
                 }
             }
-            Err(err) => {
-                debug!("ack_rx.recv: {err}");
+            Err(TryRecvError::Disconnected) => {
+                debug!("ack_rx.recv: disconnected");
                 break;
             }
         }
@@ -124,7 +131,6 @@ fn handle_acks(mut session: SessionWriter, ack_rx: Receiver<ClientResponse<Share
 
 fn handle_requests(
     mut reader: SessionReader,
-    mut writer: SessionWriter,
     requests_tx: Sender<ProcessRequest<SharedImpl>>,
     ack_tx: Sender<ClientResponse<SharedImpl>>,
     pool: PoolImpl,
@@ -143,9 +149,8 @@ fn handle_requests(
             }
             Err(err) => {
                 warn!("requests_tx.send: {}", err);
-                if let Some(nack) = packet.nack(necronomicon::SERVER_BUSY) {
-                    nack.encode(&mut writer).expect("encode");
-                    writer.flush().expect("flush");
+                if let Some(nack) = packet.nack(necronomicon::SERVER_BUSY, None) {
+                    ack_tx.send(nack.into()).expect("ack_tx.send");
                 }
                 false
             }

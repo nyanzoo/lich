@@ -3,6 +3,7 @@ use std::{
     fs::{remove_dir, File},
     io::{Cursor, Read, Seek, SeekFrom},
     mem::size_of,
+    sync::mpsc::{Receiver, Sender},
 };
 
 use hashlink::LinkedHashMap;
@@ -14,9 +15,9 @@ use necronomicon::{
     QUEUE_ALREADY_EXISTS, QUEUE_DOES_NOT_EXIST, QUEUE_EMPTY,
 };
 use phylactery::{
-    dequeue::{self, Dequeue},
+    deque::{self, Deque},
     entry::Version,
-    kv_store::{config::Config, create_store_and_graveyard, Lookup, Store as KVStore},
+    store::{config::Config, Lookup, Request, Response, Store as KVStore},
 };
 use requests::ClientRequest;
 use util::megabytes;
@@ -45,17 +46,15 @@ impl CommitStatus {
 
 pub struct Store {
     kvs: KVStore,
-    root: String,
     api_version: Version,
     store_version: u128,
-    dequeues: BTreeMap<ByteStr<SharedImpl>, Dequeue>,
     pending: hashlink::LinkedHashMap<necronomicon::Uuid, CommitStatus>,
 }
 
 impl Store {
     /// # Description
     /// Create a new store. There should be only one store per node.
-    /// Users are allowed to have a single KV Store and multiple Dequeues.
+    /// Users are allowed to have a single KV Store and multiple Deques.
     ///
     /// Additionally, this will spawn a thread for the graveyard (GC of disk fragmentation).
     ///
@@ -64,20 +63,26 @@ impl Store {
     ///
     /// # Errors
     /// See `error::Error` for details.
-    pub fn new(mut config: Config, pool: PoolImpl) -> Result<Self, Error> {
-        #[cfg(test)]
-        let hostname = "test";
-        #[cfg(not(test))]
-        let hostname = std::env::var("HOSTNAME").expect("hostname");
-        let path = format!("{}/{}/{:?}", config.path, hostname, config.version);
-
-        config.path = path.clone();
-        let (mut kvs, graveyard) = create_store_and_graveyard(config.clone(), megabytes(1))?;
-
-        std::thread::spawn(move || {
-            trace!("starting graveyard");
-            graveyard.bury(10);
-        });
+    pub fn new(
+        mut configs: Vec<Config>,
+        requests: Receiver<Request>,
+        responses: Sender<Response>,
+        pool: PoolImpl,
+    ) -> Result<Self, Error> {
+        let configs = configs
+            .drain(..)
+            .map(|config| {
+                #[cfg(test)]
+                let hostname = "test";
+                #[cfg(not(test))]
+                let hostname = std::env::var("HOSTNAME").expect("hostname");
+                let path = format!("{}/{}/{:?}", config.path, hostname, config.version);
+                config.path = path;
+                config
+            })
+            .collect::<Vec<_>>();
+        let kvs =
+            KVStore::new(configs, requests, responses, pool).map_err(phylactery::Error::Store)?;
 
         // NOTE: we might want to consider not storing the version this way.
         // As it prohibits the user from using this key.
@@ -102,7 +107,6 @@ impl Store {
 
         Ok(Self {
             // meta
-            root: config.path.clone(),
             api_version: config.version,
             store_version,
 
@@ -111,7 +115,6 @@ impl Store {
 
             // data
             kvs,
-            dequeues: BTreeMap::new(),
         })
     }
 
@@ -166,21 +169,21 @@ impl Store {
         patch.encode(&mut tl_patch).expect("must be able to encode");
 
         let res = match patch {
-            // dequeue
+            // deque
             ClientRequest::CreateQueue(queue) => {
                 let path = queue.path();
-                let ack = if self.dequeues.contains_key(&path) {
+                let ack = if self.deques.contains_key(&path) {
                     warn!("queue({:?}) already exists", path);
                     queue.nack(QUEUE_ALREADY_EXISTS)
                 } else {
-                    match Dequeue::new(
+                    match Deque::new(
                         format!("{}/{:?}", self.root, path),
                         queue.node_size(),
                         queue.max_disk_usage(),
                         self.api_version,
                     ) {
-                        Ok(dequeue) => {
-                            self.dequeues.insert(path.to_owned(), dequeue);
+                        Ok(deque) => {
+                            self.deques.insert(path.to_owned(), deque);
                             trace!("created queue {:?}", path);
 
                             if let Err(err) = self.update_version(buffer) {
@@ -199,7 +202,7 @@ impl Store {
 
             ClientRequest::DeleteQueue(queue) => {
                 let path = queue.path();
-                let ack = if self.dequeues.remove(path).is_some() {
+                let ack = if self.deques.remove(path).is_some() {
                     remove_dir(format!("{}/{:?}", self.root, path))
                         .expect("must be able to remove");
                     trace!("deleted queue {:?}", path);
@@ -220,7 +223,7 @@ impl Store {
 
             ClientRequest::Enqueue(enqueue) => {
                 let path = enqueue.path();
-                let ack = if let Some(queue) = self.dequeues.get_mut(path) {
+                let ack = if let Some(queue) = self.deques.get_mut(path) {
                     let push = queue
                         .push(enqueue.value().data().as_slice())
                         .expect("queue full");
@@ -240,24 +243,24 @@ impl Store {
                 Packet::EnqueueAck(ack)
             }
 
-            ClientRequest::Dequeue(dequeue) => {
-                let path = dequeue.path();
-                let ack = if let Some(queue) = self.dequeues.get_mut(path) {
+            ClientRequest::Deque(deque) => {
+                let path = deque.path();
+                let ack = if let Some(queue) = self.deques.get_mut(path) {
                     let pop = queue.pop(buffer).expect("queue empty");
                     trace!("popped from queue({:?}): {:?}", path, pop);
 
                     if let Err(err) = self.update_version(buffer) {
                         warn!("failed to update version: {err:?}");
-                        dequeue.nack(INTERNAL_ERROR)
+                        deque.nack(INTERNAL_ERROR)
                     } else {
                         match pop {
-                            dequeue::Pop::Popped(data) => dequeue.ack(data.into_inner()),
-                            dequeue::Pop::WaitForFlush => dequeue.nack(QUEUE_EMPTY),
+                            deque::Pop::Popped(data) => deque.ack(data.into_inner()),
+                            deque::Pop::WaitForFlush => deque.nack(QUEUE_EMPTY, None),
                         }
                     }
                 } else {
                     warn!("queue({:?}) does not exist", path);
-                    dequeue.nack(QUEUE_DOES_NOT_EXIST)
+                    deque.nack(QUEUE_DOES_NOT_EXIST, None)
                 };
 
                 Packet::DequeueAck(ack)
@@ -273,7 +276,7 @@ impl Store {
                         self.store_version += 1;
                         let ack = if let Err(err) = self.update_version(buffer) {
                             warn!("failed to update version: {err:?}");
-                            put.nack(INTERNAL_ERROR)
+                            put.nack(INTERNAL_ERROR, None)
                         } else {
                             put.ack()
                         };
@@ -282,7 +285,7 @@ impl Store {
                     }
                     Err(err) => {
                         warn!("failed to insert into kv store: {}", err);
-                        Packet::PutAck(put.nack(INTERNAL_ERROR))
+                        Packet::PutAck(put.nack(INTERNAL_ERROR, None))
                     }
                 }
             }
@@ -291,7 +294,7 @@ impl Store {
                     self.store_version += 1;
                     let ack = if let Err(err) = self.update_version(buffer) {
                         warn!("failed to update version: {err:?}");
-                        delete.nack(INTERNAL_ERROR)
+                        delete.nack(INTERNAL_ERROR, None)
                     } else {
                         delete.ack()
                     };
@@ -300,19 +303,19 @@ impl Store {
                 }
                 Err(err) => {
                     warn!("failed to delete from kv store: {}", err);
-                    Packet::DeleteAck(delete.nack(INTERNAL_ERROR))
+                    Packet::DeleteAck(delete.nack(INTERNAL_ERROR, None))
                 }
             },
             ClientRequest::Get(get) => {
                 // NOTE: no need to update version as store did not change.
                 let ack = match self.kvs.get(get.key(), buffer) {
                     Ok(lookup) => match lookup {
-                        Lookup::Absent => get.nack(KEY_DOES_NOT_EXIST),
+                        Lookup::Absent => get.nack(KEY_DOES_NOT_EXIST, None),
                         Lookup::Found(found) => get.ack(found.into_inner()),
                     },
                     Err(err) => {
                         warn!("failed to get from kv store: {}", err);
-                        get.nack(INTERNAL_ERROR)
+                        get.nack(INTERNAL_ERROR, None)
                     }
                 };
 
