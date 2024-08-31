@@ -1,7 +1,7 @@
 backend:
   image: backend
   imagePullPolicy: IfNotPresent
-  replicas: 2
+  replicas: 3
   logLevel: info
   config: |
     [endpoints]
@@ -12,7 +12,7 @@ backend:
     dir = '/opt/lich/store1'
     shards = 100
     data_len = 4096
-    meta_len = 1024
+    meta_len = 1048576
     max_disk_usage = 268435456
     block_size = 4096
     capacity = 4096
@@ -21,7 +21,7 @@ backend:
     dir = '/opt/lich/store2'
     shards = 100
     data_len = 4096
-    meta_len = 1024
+    meta_len = 1048576
     max_disk_usage = 268435456
     block_size = 4096
     capacity = 4096
@@ -30,7 +30,7 @@ backend:
     dir = '/opt/lich/store3'
     shards = 100
     data_len = 4096
-    meta_len = 1024
+    meta_len = 1048576
     max_disk_usage = 268435456
     block_size = 4096
     capacity = 4096
@@ -39,7 +39,7 @@ backend:
     dir = '/opt/lich/store4'
     shards = 100
     data_len = 4096
-    meta_len = 1024
+    meta_len = 1048576
     max_disk_usage = 268435456
     block_size = 4096
     capacity = 4096

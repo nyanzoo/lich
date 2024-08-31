@@ -24,6 +24,10 @@ spec:
           env:
             - name: RUST_LOG
               value: {{ .Values.backend.logLevel }}
+            - name: HOSTNAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
           volumeMounts:
             - name: backend-config
               mountPath: /etc/lich

@@ -15,11 +15,15 @@ spec:
     spec:
       containers:
         - name: operator
-          image: {{ .Values.operator.image}}
-          imagePullPolicy: {{ .Values.operator.imagePullPolicy}}
+          image: {{ .Values.operator.image }}
+          imagePullPolicy: {{ .Values.operator.imagePullPolicy }}
           env:
             - name: RUST_LOG
               value: {{ .Values.operator.logLevel }}
+            - name: HOSTNAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
           volumeMounts:
             - name: operator-config
               mountPath: /etc/lich
@@ -29,7 +33,7 @@ spec:
               memory: "32Mi"
               cpu: "100m"
           ports:
-              - containerPort: 666
+            - containerPort: 666
       volumes:
         - name: operator-config
           configMap:

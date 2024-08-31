@@ -3,9 +3,13 @@ version: 3
 tasks:
   put:
     cmds:
-      - RUST_BACKTRACE=full RUST_LOG=info cargo run --release -- -H 127.0.0.1 -p 666 put-only --key-set cat --value-size 128 --count 100000
+      - RUST_BACKTRACE=full RUST_LOG=info cargo run --release -- -H 127.0.0.1 -p 666 put-only -k cat -k dog -k bird -k mouse -k sheep -v 128 -c 100000
       # OOM at 1 million
 
   put_and_get:
     cmds:
-      - RUST_BACKTRACE=full RUST_LOG=info cargo run --release -- -H 127.0.0.1 -p 666 put-and-get --key-set cat --value-size 128 --count 100000 --distribution 0.5
+      - RUST_BACKTRACE=full RUST_LOG=info cargo run --release -- -H 127.0.0.1 -p 666 put-and-get -k cat -k dog -k bird -k mouse -k sheep -v 128 -c 100000 -d 0.5
+
+  queue:
+    cmds:
+      - RUST_BACKTRACE=full RUST_LOG=info cargo run --release -- -H 127.0.0.1 -p 666 queue -q cat -q dog -q bird -q mouse -q sheep -q cow -n 1024 -m 4194304 -v 128 -c 100000

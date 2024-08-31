@@ -79,13 +79,21 @@ fn main() {
     // We only need a pool temporarily for the store to initialize.
     let (request_tx, request_rx) = bounded(1024);
     let (response_tx, response_rx) = bounded(1024);
-    let store = Store::new(
-        config.stores,
-        request_rx,
-        response_tx,
-        incoming_pool.clone(),
-    )
-    .expect("store");
+    let configs = config
+        .stores
+        .iter()
+        .cloned()
+        .map(|mut config| {
+            #[cfg(test)]
+            let hostname = "test";
+            #[cfg(not(test))]
+            let hostname = std::env::var("HOSTNAME").expect("hostname");
+            let path = format!("{}{}", hostname, config.dir);
+            config.dir = path;
+            config
+        })
+        .collect::<Vec<_>>();
+    let store = Store::new(configs, request_rx, response_tx, incoming_pool.clone()).expect("store");
     trace!("store starting");
     _ = thread::Builder::new()
         .name("store".to_string())

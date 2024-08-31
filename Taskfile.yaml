@@ -150,11 +150,12 @@ tasks:
   redeploy:
     cmds:
       - task: helm-uninstall
+      - rm -rf mnt/lich/* | true
       - task: deploy
 
   cluster-create:
     cmds:
-      - k3d cluster create lich --volume /Users/robertbaldwin/Documents/GitHub/lichdom/lich/mnt/lich:/opt/lich -p 666:30666
+      - k3d cluster create lich --volume $PWD/mnt/lich:/opt/lich -p 666:30666
       - kubectl label node k3d-lich-server-0 app=backend
 
   cluster-delete:
@@ -177,7 +178,8 @@ tasks:
   client-bench:
     cmds:
       # - task: example-client-bench:put
-      - task: example-client-bench:put_and_get
+      # - task: example-client-bench:put_and_get
+      - task: example-client-bench:queue
 
   get-logs:
     cmds:

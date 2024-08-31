@@ -120,7 +120,7 @@ impl Outgoing {
                                         break;
                                     }
                                 }
-                                std::thread::sleep(std::time::Duration::from_millis(100));
+                                std::thread::sleep(std::time::Duration::from_millis(10));
                             }
                             Err(TryRecvError::Disconnected) => {
                                 trace!("requests_rx.recv: disconnected");

@@ -244,7 +244,7 @@ impl Read for TcpStream {
             if len > 0 {
                 break len;
             };
-            std::thread::sleep(Duration::from_millis(100));
+            std::thread::sleep(Duration::from_millis(10));
         };
         Ok(len)
     }

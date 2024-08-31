@@ -18,6 +18,10 @@ spec:
           env:
             - name: RUST_LOG
               value: {{ .Values.frontend.logLevel }}
+            - name: HOSTNAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
           volumeMounts:
             - name: frontend-config
               mountPath: /etc/lich
@@ -27,7 +31,7 @@ spec:
               memory: "128Mi"
               cpu: "500m"
           ports:
-              - containerPort: 666
+            - containerPort: 666
       volumes:
         - name: frontend-config
           configMap:

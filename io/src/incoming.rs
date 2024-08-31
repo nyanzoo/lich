@@ -113,7 +113,7 @@ fn handle_acks(mut session: SessionWriter, ack_rx: Receiver<ClientResponse<Share
                         break;
                     }
                 } else {
-                    std::thread::sleep(Duration::from_millis(100));
+                    std::thread::sleep(Duration::from_millis(10));
                 }
             }
             Err(TryRecvError::Disconnected) => {

@@ -81,6 +81,7 @@ impl Store {
                 config
             })
             .collect::<Vec<_>>();
+        info!("creating stores at '{configs:?}'");
         let kvs =
             KVStore::new(configs, requests, responses, pool).map_err(phylactery::Error::Store)?;
 
