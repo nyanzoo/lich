@@ -128,7 +128,7 @@ tasks:
   helm-install:
     cmds:
       - task: helm-package
-      - helm install lich lich-0.1.0.tgz
+      - helm install lich lich-0.1.0.tgz --wait
 
   helm-uninstall:
     cmds:
@@ -153,14 +153,24 @@ tasks:
       - rm -rf mnt/lich/* | true
       - task: deploy
 
+  redeploy-quick:
+    cmds:
+      - task: helm-uninstall
+      - rm -rf mnt/lich/* | true
+      - task: helm-install
+
   cluster-create:
     cmds:
+      - echo "adding $PWD/mnt/lich"
+      - mkdir -p $PWD/mnt/lich
       - k3d cluster create lich --volume $PWD/mnt/lich:/opt/lich -p 666:30666
       - kubectl label node k3d-lich-server-0 app=backend
 
   cluster-delete:
     cmds:
       - k3d cluster delete lich
+      - echo "removing $PWD/mnt/lich"
+      - rm -rf $PWD/mnt/lich
 
   cluster-recreate:
     cmds:
@@ -178,8 +188,8 @@ tasks:
   client-bench:
     cmds:
       # - task: example-client-bench:put
-      # - task: example-client-bench:put_and_get
-      - task: example-client-bench:queue
+      - task: example-client-bench:put_and_get
+      # - task: example-client-bench:queue
 
   get-logs:
     cmds:

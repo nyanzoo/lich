@@ -1,4 +1,4 @@
-use std::thread;
+use std::{path::PathBuf, thread};
 
 use crossbeam::channel::bounded;
 use log::{info, trace};
@@ -88,8 +88,9 @@ fn main() {
             let hostname = "test";
             #[cfg(not(test))]
             let hostname = std::env::var("HOSTNAME").expect("hostname");
-            let path = format!("{}{}", hostname, config.dir);
-            config.dir = path;
+            let mut path = PathBuf::from(config.dir);
+            path.push(hostname);
+            config.dir = path.to_str().expect("valid path").to_owned();
             config
         })
         .collect::<Vec<_>>();

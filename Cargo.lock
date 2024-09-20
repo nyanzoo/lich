@@ -703,7 +703,7 @@ checksum = "9bec4598fddb13cc7b528819e697852653252b760f1228b7642679bf2ff2cd07"
 [[package]]
 name = "necronomicon"
 version = "0.1.0"
-source = "git+https://github.com/nyanzoo/necronomicon?branch=develop#034cad699684d8a98eadea37f3cd381e843a6c0c"
+source = "git+https://github.com/nyanzoo/necronomicon?branch=develop#89dfccde0c20868a7348773becbb762a4609da96"
 dependencies = [
  "crossbeam-channel",
  "log",
@@ -883,7 +883,7 @@ checksum = "e3148f5046208a5d56bcfc03053e3ca6334e51da8dfb19b6cdc8b306fae3283e"
 [[package]]
 name = "phylactery"
 version = "0.1.0"
-source = "git+https://github.com/nyanzoo/phylactery?branch=develop#361e28b0abd9a66c1606cede6424125c57607299"
+source = "git+https://github.com/nyanzoo/phylactery?branch=develop#ce11c75917f2e77a0d32690efce30c566b7491e5"
 dependencies = [
  "crc32fast",
  "crossbeam",
