@@ -1,0 +1,41 @@
+[endpoints]
+port = 10001
+operator_addr = 'localhost:10000'
+
+[[stores]]
+dir = './lich/'
+shards = 4
+
+[stores.meta_store]
+size = "1 KiB"
+
+[stores.data_store]
+node_size = "1 KiB"
+max_disk_usage = "4 KiB"
+
+[stores.pool]
+block_size = "1 KiB"
+capacity = 100
+
+[[stores]]
+dir = './lich2/'
+shards = 100
+
+[stores.meta_store]
+size = "1 KiB"
+
+[stores.data_store]
+node_size = "2 KiB"
+max_disk_usage = "8 KiB"
+
+[stores.pool]
+block_size = "4 KiB"
+capacity = 4
+
+[incoming_pool]
+block_size = "1 KiB"
+capacity = 1024
+
+[outgoing_pool]
+block_size = "1 KiB"
+capacity = 1024

@@ -1,9 +1,49 @@
-[package]
-name = "lich"
-version = "0.1.0"
-edition = "2021"
+[workspace]
+resolver = "2"
+members = [
+    "backend",
+    "config",
+    "frontend",
+    "io",
+    "logger",
+    "net",
+    "operator",
+    "requests",
+    "util",
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+    "examples/*",
+]
 
-[dependencies]
-phylactery = { git = "https://github.com/nyanzoo/phylactery" }
+[workspace.dependencies]
+# 1st-party
+
+# 2nd-party
+necronomicon = { git = "https://github.com/nyanzoo/necronomicon", branch = "develop" }
+phylactery = { git = "https://github.com/nyanzoo/phylactery", branch = "develop" }
+
+# 3rd-party
+clap = "4"
+crossbeam = "0.8"
+dhat = "0.3"
+env_logger = "0.11"
+hashlink = "0.9"
+human-size = "0"
+lazy_static = "1.4"
+log = "0.4"
+matches = "0.1"
+opentelemetry = "0"
+opentelemetry-appender-log = "0"
+opentelemetry_sdk = "0"
+opentelemetry-semantic-conventions = "0"
+opentelemetry-stdout = { version = "0", features = ["trace"] }
+parking_lot = "0.12"
+rand = "0.8"
+rayon = "1.10"
+serde = { version = "1.0" }
+simplelog = { version = "0.12" }
+syslog = "6"
+tempfile = "3.10"
+testcontainers = "0.16"
+thiserror = "1.0"
+toml = "0.8"
+uuid = "1.8"

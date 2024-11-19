@@ -1,0 +1,18 @@
+[package]
+edition = "2021"
+name = "requests"
+version = "0.1.0"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+crossbeam = { workspace = true }
+log = { workspace = true }
+
+necronomicon = { workspace = true }
+phylactery = { workspace = true }
+
+[dev-dependencies]
+
+[features]
+backend = []

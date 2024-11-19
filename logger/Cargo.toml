@@ -1,0 +1,34 @@
+[package]
+edition = "2021"
+name = "logger"
+version = "0.1.0"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+log = { workspace = true }
+# env
+env_logger = { workspace = true, optional = true }
+# otel
+opentelemetry-appender-log = { workspace = true, optional = true }
+opentelemetry = { workspace = true, optional = true }
+opentelemetry_sdk = { workspace = true, optional = true }
+opentelemetry-semantic-conventions = { workspace = true, optional = true }
+opentelemetry-stdout = { workspace = true, optional = true }
+# simple
+simplelog = { workspace = true, optional = true }
+# sys
+syslog = { workspace = true, optional = true }
+
+[features]
+default = ["simple"]
+env = ["env_logger"]
+otel = [
+    "opentelemetry/logs",
+    "opentelemetry_sdk/logs",
+    "opentelemetry-semantic-conventions",
+    "opentelemetry-appender-log",
+    "opentelemetry-stdout/logs",
+]
+simple = ["simplelog"]
+sys = ["syslog"]

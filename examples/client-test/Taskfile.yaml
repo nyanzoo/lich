@@ -1,0 +1,14 @@
+version: 3
+
+tasks:
+  put:
+    cmds:
+      - cargo run --release -- -H 127.0.0.1 -p 666 put -k cat -v cute
+
+  get:
+    cmds:
+      - cargo run --release -- -H 127.0.0.1 -p 666 get -k cat
+
+  delete:
+    cmds:
+      - cargo run --release -- -H 127.0.0.1 -p 666 delete -k cat
