@@ -50,7 +50,7 @@ fn send_command(host: String, port: u16, command: Command) {
     stream.flush().unwrap();
     println!("sent packet: {:?}", packet);
 
-    let mut owned = pool.acquire("test");
+    let mut owned = pool.acquire("cat", "test");
     let response = full_decode(&mut stream, &mut owned, None).unwrap();
     println!("response: {:?}", response);
 }
@@ -60,9 +60,9 @@ impl Command {
         let uuid = uuid::Uuid::new_v4().as_u128();
         match self {
             Command::Put { key, value } => {
-                let mut owned = pool.acquire("test");
+                let mut owned = pool.acquire("cat", "test");
                 let key = ByteStr::from_owned(key, &mut owned).expect("key");
-                let mut owned = pool.acquire("test");
+                let mut owned = pool.acquire("cat", "test");
                 let value = BinaryData::from_owned(value, &mut owned).expect("value");
 
                 Packet::Store(StorePacket::Put(kv_store_codec::Put::new(
@@ -73,7 +73,7 @@ impl Command {
                 )))
             }
             Command::Get { key } => {
-                let mut owned = pool.acquire("test");
+                let mut owned = pool.acquire("cat", "test");
                 let key = ByteStr::from_owned(key, &mut owned).expect("key");
 
                 Packet::Store(StorePacket::Get(kv_store_codec::Get::new(
@@ -83,7 +83,7 @@ impl Command {
                 )))
             }
             Command::Delete { key } => {
-                let mut owned = pool.acquire("test");
+                let mut owned = pool.acquire("cat", "test");
                 let key = ByteStr::from_owned(key, &mut owned).expect("key");
 
                 Packet::Store(StorePacket::Delete(kv_store_codec::Delete::new(

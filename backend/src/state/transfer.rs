@@ -54,7 +54,7 @@ impl State for Transfer {
             //         .expect("send");
             // }
 
-            let mut owned = outgoing_pool.acquire(BufferOwner::Position);
+            let mut owned = outgoing_pool.acquire("state", BufferOwner::Position);
 
             Box::new(Ready {
                 endpoint_config,

@@ -159,11 +159,44 @@ tasks:
       - rm -rf mnt/lich/* | true
       - task: helm-install
 
+  istio-install:
+    cmds:
+      - helm repo add istio https://istio-release.storage.googleapis.com/charts
+      - helm repo add kubernetes-dashboard https://kubernetes.github.io/dashboard/
+      - helm repo update
+      - kubectl create namespace istio-system
+      # - kubectl create namespace istio-ingress
+      - helm install istio-base istio/base -n istio-system --wait
+      - helm install istiod istio/istiod -n istio-system --wait
+      - helm install istio-ingressgateway istio/gateway -n istio-system --wait
+      - helm upgrade --install kubernetes-dashboard kubernetes-dashboard/kubernetes-dashboard --create-namespace --namespace kubernetes-dashboard
+      - kubectl create serviceaccount -n kubernetes-dashboard admin-user
+      - kubectl create clusterrolebinding -n kubernetes-dashboard admin-user --clusterrole cluster-admin --serviceaccount=kubernetes-dashboard:admin-user
+      - echo "$(kubectl -n kubernetes-dashboard create token admin-user)"
+      - kubectl proxy
+
+  cluster-istio-create:
+    cmds:
+      - echo "adding $PWD/mnt/lich"
+      - mkdir -p $PWD/mnt/lich
+      - |
+        k3d cluster create lich \
+        --api-port 6550 \
+        --agents 2 \
+        -p 666:30666 \
+        -p 3000:3000 \
+        -p '8080:80@loadbalancer' \
+        -p '8443:443@loadbalancer' \
+        --volume $PWD/mnt/lich:/opt/lich \
+        --k3s-arg '--disable=traefik@server:*'
+      - kubectl label node k3d-lich-server-0 app=backend
+      - task: istio-install
+
   cluster-create:
     cmds:
       - echo "adding $PWD/mnt/lich"
       - mkdir -p $PWD/mnt/lich
-      - k3d cluster create lich --volume $PWD/mnt/lich:/opt/lich -p 666:30666
+      - k3d cluster create lich --volume $PWD/mnt/lich:/opt/lich -p 666:30666 -p 3000:3000
       - kubectl label node k3d-lich-server-0 app=backend
 
   cluster-delete:
@@ -188,8 +221,8 @@ tasks:
   client-bench:
     cmds:
       # - task: example-client-bench:put
-      - task: example-client-bench:put_and_get
-      # - task: example-client-bench:queue
+      # - task: example-client-bench:put_and_get
+      - task: example-client-bench:queue
 
   get-logs:
     cmds:

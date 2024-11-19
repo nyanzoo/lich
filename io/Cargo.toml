@@ -8,6 +8,8 @@ version = "0.1.0"
 [dependencies]
 crossbeam = { workspace = true }
 log = { workspace = true }
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true, features = ["metrics"] }
 rayon = { workspace = true }
 thiserror = { workspace = true }
 

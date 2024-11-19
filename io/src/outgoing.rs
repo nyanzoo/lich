@@ -157,7 +157,7 @@ impl Outgoing {
 
                     let mut previous_decoded_header = None;
                     'pool: loop {
-                        let mut buffer = pool.acquire(BufferOwner::FullDecode);
+                        let mut buffer = pool.acquire("outgoing decode", BufferOwner::FullDecode);
                         'decode: loop {
                             match full_decode(
                                 &mut read,

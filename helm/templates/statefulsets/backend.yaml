@@ -35,9 +35,9 @@ spec:
             - name: backend-pv
               mountPath: /opt/lich
               readOnly: false
-          resources:
-            limits:
-              memory: "256Mi"
+          # resources:
+            # limits:
+              # memory: "4Gi"
               # cpu: "1250m"
           ports:
             - containerPort: 666

@@ -24,25 +24,17 @@ const CONFIG: &str = "/etc/lich/lich.toml";
 
 #[derive(Clone, Copy, Debug)]
 enum BufferOwner {
-    DeconstructPath,
-    DeconstructContent,
     Join,
     OperatorFullDecode,
     Position,
-    StoreCommit,
-    StoreVersion,
 }
 
 impl necronomicon::BufferOwner for BufferOwner {
     fn why(&self) -> &'static str {
         match self {
-            BufferOwner::DeconstructPath => "deconstruct path",
-            BufferOwner::DeconstructContent => "deconstruct content",
             BufferOwner::Join => "join",
             BufferOwner::OperatorFullDecode => "operator full decode",
             BufferOwner::Position => "position",
-            BufferOwner::StoreCommit => "store commit",
-            BufferOwner::StoreVersion => "store version",
         }
     }
 }
@@ -73,7 +65,7 @@ fn main() {
     let config = toml::from_str::<BackendConfig>(&contents).expect("valid config");
 
     let incoming_pool = PoolImpl::new(
-        config.incoming_pool.block_size,
+        config.incoming_pool.block_size.to_bytes() as usize,
         config.incoming_pool.capacity,
     );
     // We only need a pool temporarily for the store to initialize.
@@ -110,7 +102,7 @@ fn main() {
         });
 
     let outgoing_pool = PoolImpl::new(
-        config.outgoing_pool.block_size,
+        config.outgoing_pool.block_size.to_bytes() as usize,
         config.outgoing_pool.capacity,
     );
     let mut state = Init::init(

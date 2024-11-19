@@ -79,7 +79,7 @@ impl Write for TcpStream {
 }
 
 #[derive(Clone, Debug)]
-pub struct SocketAddr(std::net::SocketAddr);
+pub struct SocketAddr(#[allow(dead_code)] std::net::SocketAddr);
 
 pub struct TcpListener {
     inner: std::net::TcpListener,

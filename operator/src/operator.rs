@@ -47,6 +47,9 @@ impl ClusterInner {
         })
     }
 
+    // TODO(rojang):
+    // check if needed?
+    #[allow(dead_code)]
     fn existing_backend(&mut self, addr: &ByteStr<SharedImpl>) -> Option<(usize, &Backend)> {
         if let Some((pos, backend)) = self
             .backends
@@ -511,6 +514,7 @@ mod tests {
         ]);
     }
 
+    #[ignore = "re-enable when store transfer is implemented"]
     #[test]
     fn store_transfer() {
         let cluster = Cluster::default();

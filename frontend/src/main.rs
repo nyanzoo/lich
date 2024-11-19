@@ -48,7 +48,7 @@ fn main() {
     let (requests_tx, requests_rx) = bounded(1024);
 
     let incoming_pool = PoolImpl::new(
-        config.incoming_pool.block_size,
+        config.incoming_pool.block_size.to_bytes() as usize,
         config.incoming_pool.capacity,
     );
     _ = thread::Builder::new()
@@ -58,7 +58,7 @@ fn main() {
         });
 
     let outgoing_pool = PoolImpl::new(
-        config.outgoing_pool.block_size,
+        config.outgoing_pool.block_size.to_bytes() as usize,
         config.outgoing_pool.capacity,
     );
     let mut state: Box<dyn State> = Init::init(config.endpoints, requests_rx, outgoing_pool) as _;

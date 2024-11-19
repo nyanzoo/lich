@@ -11,45 +11,69 @@ backend:
     [[stores]]
     dir = '/opt/lich/store1'
     shards = 100
-    data_len = 4096
-    meta_len = 1048576
-    max_disk_usage = 268435456
-    block_size = 4096
+
+    [stores.meta_store]
+    size = "100 MiB"
+
+    [stores.data_store]
+    node_size = "1 MiB"
+    max_disk_usage = "2 GiB"
+
+    [stores.pool]
+    block_size = "1 MiB"
     capacity = 4096
 
     [[stores]]
     dir = '/opt/lich/store2'
     shards = 100
-    data_len = 4096
-    meta_len = 1048576
-    max_disk_usage = 268435456
-    block_size = 4096
+
+    [stores.meta_store]
+    size = "100 MiB"
+
+    [stores.data_store]
+    node_size = "1 MiB"
+    max_disk_usage = "2 GiB"
+
+    [stores.pool]
+    block_size = "1 MiB"
     capacity = 4096
 
     [[stores]]
     dir = '/opt/lich/store3'
     shards = 100
-    data_len = 4096
-    meta_len = 1048576
-    max_disk_usage = 268435456
-    block_size = 4096
+
+    [stores.meta_store]
+    size = "100 MiB"
+
+    [stores.data_store]
+    node_size = "1 MiB"
+    max_disk_usage = "2 GiB"
+
+    [stores.pool]
+    block_size = "1 MiB"
     capacity = 4096
 
     [[stores]]
     dir = '/opt/lich/store4'
     shards = 100
-    data_len = 4096
-    meta_len = 1048576
-    max_disk_usage = 268435456
-    block_size = 4096
+
+    [stores.meta_store]
+    size = "100 MiB"
+
+    [stores.data_store]
+    node_size = "1 MiB"
+    max_disk_usage = "2 GiB"
+
+    [stores.pool]
+    block_size = "1 MiB"
     capacity = 4096
 
     [incoming_pool]
-    block_size = 4096
+    block_size = "1 MiB"
     capacity = 4096
 
     [outgoing_pool]
-    block_size = 4096
+    block_size = "1 MiB"
     capacity = 4096
 frontend:
   image: frontend
@@ -62,11 +86,11 @@ frontend:
     operator_addr='operator-0.operator.default.svc.cluster.local:666'
 
     [incoming_pool]
-    block_size = 4096
+    block_size = "1 MiB"
     capacity = 4096
 
     [outgoing_pool]
-    block_size = 4096
+    block_size = "1 MiB"
     capacity = 4096
 operator:
   image: operator

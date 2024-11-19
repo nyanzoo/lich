@@ -21,7 +21,7 @@ net = { path = "../net" }
 requests = { path = "../requests", features = ["backend"] }
 
 necronomicon = { workspace = true, features = ["timeout"] }
-phylactery = { workspace = true, branch = "develop" }
+phylactery = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

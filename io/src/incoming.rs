@@ -7,13 +7,12 @@ use std::{
 
 use crossbeam::channel::{bounded, Receiver, Sender, TryRecvError};
 use log::{debug, error, info, trace, warn};
-use rayon::{ThreadPool, ThreadPoolBuilder};
-
 use necronomicon::{Encode, PoolImpl, SharedImpl};
 use net::{
     session::{Session, SessionReader, SessionWriter},
     stream::TcpListener,
 };
+use rayon::{ThreadPool, ThreadPoolBuilder};
 use requests::{ClientRequest, ClientResponse, ProcessRequest};
 
 use crate::decode_packet_on_reader_and;
@@ -52,6 +51,8 @@ impl Incoming {
             requests_tx,
             pool,
         } = self;
+
+        // let _incoming_request_counter = IncomingRequestCounter::new(meter);
 
         let mut session_map = BTreeMap::new();
         // If same stream  reconnects we need to kill the old threads.
@@ -113,7 +114,7 @@ fn handle_acks(mut session: SessionWriter, ack_rx: Receiver<ClientResponse<Share
                         break;
                     }
                 } else {
-                    std::thread::sleep(Duration::from_millis(10));
+                    std::thread::sleep(Duration::from_millis(1));
                 }
             }
             Err(TryRecvError::Disconnected) => {

@@ -107,28 +107,28 @@ impl From<ClientRequest<SharedImpl>> for Request {
     }
 }
 
-impl<S> Into<Packet<S>> for ClientRequest<S>
+impl<S> From<ClientRequest<S>> for Packet<S>
 where
     S: Shared,
 {
-    fn into(self) -> Packet<S> {
-        match self {
+    fn from(value: ClientRequest<S>) -> Self {
+        match value {
             // deque
-            ClientRequest::CreateQueue(packet) => Packet::Deque(DequePacket::CreateQueue(packet)),
-            ClientRequest::DeleteQueue(packet) => Packet::Deque(DequePacket::DeleteQueue(packet)),
-            ClientRequest::Enqueue(packet) => Packet::Deque(DequePacket::Enqueue(packet)),
-            ClientRequest::Deque(packet) => Packet::Deque(DequePacket::Dequeue(packet)),
-            ClientRequest::Peek(packet) => Packet::Deque(DequePacket::Peek(packet)),
-            ClientRequest::Len(packet) => Packet::Deque(DequePacket::Len(packet)),
+            ClientRequest::CreateQueue(packet) => Self::Deque(DequePacket::CreateQueue(packet)),
+            ClientRequest::DeleteQueue(packet) => Self::Deque(DequePacket::DeleteQueue(packet)),
+            ClientRequest::Enqueue(packet) => Self::Deque(DequePacket::Enqueue(packet)),
+            ClientRequest::Deque(packet) => Self::Deque(DequePacket::Dequeue(packet)),
+            ClientRequest::Peek(packet) => Self::Deque(DequePacket::Peek(packet)),
+            ClientRequest::Len(packet) => Self::Deque(DequePacket::Len(packet)),
 
             // kv store
-            ClientRequest::Put(packet) => Packet::Store(StorePacket::Put(packet)),
-            ClientRequest::Get(packet) => Packet::Store(StorePacket::Get(packet)),
-            ClientRequest::Delete(packet) => Packet::Store(StorePacket::Delete(packet)),
+            ClientRequest::Put(packet) => Self::Store(StorePacket::Put(packet)),
+            ClientRequest::Get(packet) => Self::Store(StorePacket::Get(packet)),
+            ClientRequest::Delete(packet) => Self::Store(StorePacket::Delete(packet)),
 
             // transfer
             #[cfg(feature = "backend")]
-            ClientRequest::Transfer(packet) => Packet::System(SystemPacket::Transfer(packet)),
+            ClientRequest::Transfer(packet) => Self::System(SystemPacket::Transfer(packet)),
         }
     }
 }

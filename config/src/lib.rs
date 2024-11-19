@@ -1,8 +1,4 @@
-#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
-pub struct PoolConfig {
-    pub block_size: usize,
-    pub capacity: usize,
-}
+use phylactery::store::PoolConfig;
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct EndpointConfig {
@@ -37,7 +33,8 @@ pub struct OperatorConfig {
 #[cfg(test)]
 pub mod test {
 
-    use phylactery::store;
+    use human_size::{Byte, SpecificSize};
+    use phylactery::store::{self, DataConfig, MetaConfig, PoolConfig};
 
     use super::{BackendConfig, EndpointConfig, OperatorConfig};
 
@@ -52,66 +49,46 @@ pub mod test {
                 store::Config {
                     dir: "./lich/".to_owned(),
                     shards: 4,
-                    data_len: 1024,
-                    meta_len: 1024,
-                    max_disk_usage: 4096,
-                    block_size: 1024,
-                    capacity: 100,
+                    meta_store: MetaConfig {
+                        size: SpecificSize::new(1024.0, Byte).unwrap(),
+                    },
+                    data_store: DataConfig {
+                        node_size: SpecificSize::new(1024.0, Byte).unwrap(),
+                        max_disk_usage: SpecificSize::new(4096.0, Byte).unwrap(),
+                    },
+                    pool: PoolConfig {
+                        block_size: SpecificSize::new(1024.0, Byte).unwrap(),
+                        capacity: 100,
+                    },
                 },
                 store::Config {
                     dir: "./lich2/".to_owned(),
                     shards: 100,
-                    data_len: 2048,
-                    meta_len: 1024,
-                    max_disk_usage: 8096,
-                    block_size: 2048,
-                    capacity: 4,
+                    meta_store: MetaConfig {
+                        size: SpecificSize::new(1024, Byte).unwrap(),
+                    },
+                    data_store: DataConfig {
+                        node_size: SpecificSize::new(2048, Byte).unwrap(),
+                        max_disk_usage: SpecificSize::new(8192, Byte).unwrap(),
+                    },
+                    pool: PoolConfig {
+                        block_size: SpecificSize::new(4096.0, Byte).unwrap(),
+                        capacity: 4,
+                    },
                 },
             ],
-            incoming_pool: crate::PoolConfig {
-                block_size: 1024,
+            incoming_pool: PoolConfig {
+                block_size: SpecificSize::new(1024.0, Byte).unwrap(),
                 capacity: 1024,
             },
-            outgoing_pool: crate::PoolConfig {
-                block_size: 1024,
+            outgoing_pool: PoolConfig {
+                block_size: SpecificSize::new(1024.0, Byte).unwrap(),
                 capacity: 1024,
             },
         };
 
-        let actual = toml::from_str::<BackendConfig>(
-            r"
-            [endpoints]
-            port = 10001
-            operator_addr = 'localhost:10000'
-
-            [[stores]]
-            dir = './lich/'
-            shards = 4
-            data_len = 1024
-            meta_len = 1024
-            max_disk_usage = 4096
-            block_size = 1024
-            capacity = 100
-
-            [[stores]]
-            dir = './lich2/'
-            shards = 100
-            data_len = 2048
-            meta_len = 1024
-            max_disk_usage = 8096
-            block_size = 2048
-            capacity = 4
-
-            [incoming_pool]
-            block_size = 1024
-            capacity = 1024
-
-            [outgoing_pool]
-            block_size = 1024
-            capacity = 1024
-        ",
-        )
-        .expect("valid config");
+        let example = include_str!("../test/example.toml");
+        let actual = toml::from_str::<BackendConfig>(example).expect("valid config");
         assert_eq!(actual, expected);
     }
 

@@ -6,6 +6,7 @@ use net::session::SessionReader;
 
 pub mod error;
 pub mod incoming;
+mod metrics;
 pub mod outgoing;
 
 #[derive(Clone, Copy, Debug)]
@@ -31,7 +32,7 @@ where
     let mut previous_decoded_header = None;
 
     loop {
-        let mut buffer = pool.acquire(BufferOwner::FullDecode);
+        let mut buffer = pool.acquire("decode wait", BufferOwner::FullDecode);
 
         'decode: loop {
             // We should know whether we have enough buffer to read the packet or not by checking the header.
@@ -69,7 +70,7 @@ where
     let mut previous_decoded_header = None;
 
     'pool: loop {
-        let mut buffer = pool.acquire(BufferOwner::FullDecode);
+        let mut buffer = pool.acquire("decode and", BufferOwner::FullDecode);
 
         'decode: loop {
             // We should know whether we have enough buffer to read the packet or not by checking the header.

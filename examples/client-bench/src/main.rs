@@ -11,7 +11,7 @@ use clap::Parser;
 use necronomicon::{
     deque_codec::{Create, Dequeue, Enqueue},
     full_decode,
-    kv_store_codec::{Get, Put},
+    kv_store_codec::{self, Get, Put},
     Ack, BinaryData, ByteStr, DequePacket, Encode, Packet, Pool, PoolImpl, StorePacket,
 };
 use rand::Rng;
@@ -76,7 +76,7 @@ enum Scenario {
 }
 
 fn run(host: String, port: u16, scenario: Scenario) {
-    let pool = PoolImpl::new(2048, 4096);
+    let pool = PoolImpl::new(2048, 1024 * 1024);
     let start = Instant::now();
     match scenario {
         Scenario::PutOnly {
@@ -89,11 +89,11 @@ fn run(host: String, port: u16, scenario: Scenario) {
             let time_to_send = Instant::now();
             for i in 0..count {
                 let key = key_set[i % key_set.len()].clone();
-                let mut owned = pool.acquire("bench");
+                let mut owned = pool.acquire("bench", "bench");
                 let key = ByteStr::from_owned(key, &mut owned).expect("key");
                 // generate random value
                 let value = generate_random_bytes(value_size);
-                let mut owned = pool.acquire("bench");
+                let mut owned = pool.acquire("bench", "bench");
                 let value = BinaryData::from_owned(value, &mut owned).expect("value");
                 let uuid = Uuid::new_v4().as_u128();
                 packet_tracker.insert(necronomicon::Uuid::from(uuid));
@@ -105,7 +105,7 @@ fn run(host: String, port: u16, scenario: Scenario) {
 
             let time_to_receive = Instant::now();
             for _ in 0..count {
-                let mut buffer = pool.acquire("bench");
+                let mut buffer = pool.acquire("bench", "bench");
                 let response = full_decode(&mut stream, &mut buffer, None);
                 if let Ok(response) = response {
                     let Packet::Store(StorePacket::PutAck(response)) = response else {
@@ -131,10 +131,12 @@ fn run(host: String, port: u16, scenario: Scenario) {
             let mut packet_tracker = HashSet::new();
             let time_to_send = Instant::now();
             let mut rng = rand::thread_rng();
+            let mut gets = vec![];
+            let mut deletes = vec![];
             for i in 0..count {
                 let key = key_set[i % key_set.len()].clone();
                 let key = format!("{}-{}", key, i);
-                let mut owned = pool.acquire("bench");
+                let mut owned = pool.acquire("bench", "bench");
                 let key = ByteStr::from_owned(key, &mut owned).expect("key");
                 // generate random value
                 let uuid = Uuid::new_v4().as_u128();
@@ -142,22 +144,33 @@ fn run(host: String, port: u16, scenario: Scenario) {
                 let chance = rng.gen_range(0.0..=1.0);
                 if distribution > chance {
                     let value = generate_random_bytes(value_size);
-                    let mut owned = pool.acquire("bench");
+                    let mut owned = pool.acquire("bench", "bench");
                     let value = BinaryData::from_owned(value, &mut owned).expect("value");
                     let packet = Put::new(1, uuid, key.inner().clone(), value);
                     packet.encode(&mut stream).unwrap();
+                    let packet = kv_store_codec::Delete::new(1, uuid, key.inner().clone());
+                    deletes.push(packet);
                 } else {
                     let packet = Get::new(1, uuid, key.inner().clone());
-                    packet.encode(&mut stream).unwrap();
+                    gets.push(packet);
                 }
             }
+
+            for packet in gets {
+                packet.encode(&mut stream).unwrap();
+            }
+
+            for packet in deletes {
+                packet.encode(&mut stream).unwrap();
+            }
+
             stream.flush().unwrap();
             println!("time to send: {:?}", time_to_send.elapsed());
 
             let time_to_receive = Instant::now();
             let mut report: HashMap<&'static str, HashMap<u8, usize>> = HashMap::new();
             for i in 0..count {
-                let mut buffer = pool.acquire("bench");
+                let mut buffer = pool.acquire("bench", "bench");
 
                 let response = full_decode(&mut stream, &mut buffer, None).unwrap();
                 match response {
@@ -175,6 +188,17 @@ fn run(host: String, port: u16, scenario: Scenario) {
                     Packet::Store(StorePacket::GetAck(response)) => {
                         report
                             .entry("get")
+                            .or_default()
+                            .entry(response.response().code())
+                            .or_default()
+                            .add_assign(1);
+                        if !packet_tracker.remove(&response.header().uuid) {
+                            panic!("received unexpected response: {:?}", response);
+                        }
+                    }
+                    Packet::Store(StorePacket::DeleteAck(response)) => {
+                        report
+                            .entry("delete")
                             .or_default()
                             .entry(response.response().code())
                             .or_default()
@@ -212,7 +236,7 @@ fn run(host: String, port: u16, scenario: Scenario) {
             let uuid = Uuid::new_v4().as_u128();
             let mut queues = vec![];
             for queue_name in queue_names {
-                let mut owned = pool.acquire("bench");
+                let mut owned = pool.acquire("bench", "bench");
                 let path = ByteStr::from_owned(queue_name, &mut owned).expect("queue name");
                 queues.push(path.clone());
             }
@@ -230,7 +254,7 @@ fn run(host: String, port: u16, scenario: Scenario) {
 
                 stream.flush().unwrap();
 
-                let mut buffer = pool.acquire("bench");
+                let mut buffer = pool.acquire("bench", "bench");
                 let response = full_decode(&mut stream, &mut buffer, None);
                 if let Ok(response) = response {
                     let Packet::Deque(DequePacket::CreateQueueAck(response)) = response else {
@@ -247,7 +271,7 @@ fn run(host: String, port: u16, scenario: Scenario) {
             let time_to_send = Instant::now();
             for _ in 0..count {
                 let value = generate_random_bytes(value_size);
-                let mut owned = pool.acquire("bench");
+                let mut owned = pool.acquire("bench", "bench");
                 let value = BinaryData::from_owned(value, &mut owned).expect("value");
 
                 let uuid = Uuid::new_v4().as_u128();
@@ -264,7 +288,7 @@ fn run(host: String, port: u16, scenario: Scenario) {
             let time_to_receive = Instant::now();
 
             for _ in 0..count {
-                let mut buffer = pool.acquire("bench");
+                let mut buffer = pool.acquire("bench", "bench");
                 let response = full_decode(&mut stream, &mut buffer, None);
                 if let Ok(response) = response {
                     let Packet::Deque(DequePacket::EnqueueAck(response)) = response else {
@@ -303,7 +327,7 @@ fn run(host: String, port: u16, scenario: Scenario) {
             let time_to_receive = Instant::now();
 
             for _ in 0..count {
-                let mut buffer = pool.acquire("bench");
+                let mut buffer = pool.acquire("bench", "bench");
                 let response = full_decode(&mut stream, &mut buffer, None);
                 if let Ok(response) = response {
                     let Packet::Deque(DequePacket::DequeueAck(response)) = response else {

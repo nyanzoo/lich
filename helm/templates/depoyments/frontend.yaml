@@ -26,10 +26,10 @@ spec:
             - name: frontend-config
               mountPath: /etc/lich
               readOnly: true
-          resources:
-            limits:
-              memory: "128Mi"
-              cpu: "500m"
+          # resources:
+          #   limits:
+          #     memory: "128Mi"
+          #     cpu: "500m"
           ports:
             - containerPort: 666
       volumes:
